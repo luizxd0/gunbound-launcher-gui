@@ -1,0 +1,21 @@
+[URLs]
+Manifest=http://update.gunbound.site/update/file-list.txt
+BaseFiles=http://update.gunbound.site/update/gamefiles/
+LauncherVersion=http://update.gunbound.site/update/launcher-version.txt
+
+[LauncherConfig]
+LastID=test
+BuddyIP=127.0.0.1
+ServerIP=127.0.0.1
+BaseUrl=http://update.gunbound.site
+
+[Screen]
+WindowedMode=1
+# Optional: path to dxwnd.exe to launch game in a window (e.g. DxWndPath=dxwnd.exe). Else use cnc-ddraw ddraw.dll in the game folder.
+
+[GameConfig]
+Effect3D=3
+VolEffect=95
+VolMusic=94
+BackGround=1
+GraphResolution=0
