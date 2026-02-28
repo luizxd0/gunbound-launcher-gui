@@ -381,10 +381,18 @@ namespace Launcher
             string loginCheckUrl = GunBoundLauncher.GetLoginCheckUrl(appBase);
             if (!string.IsNullOrEmpty(loginCheckUrl))
             {
-                string errorMessage;
-                if (!GunBoundLauncher.VerifyCredentials(username, password, loginCheckUrl, out errorMessage))
+                try
                 {
-                    MessageBox.Show(errorMessage ?? "Invalid username or password.", "Login failed", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    string errorMessage;
+                    if (!GunBoundLauncher.VerifyCredentials(username, password, loginCheckUrl, out errorMessage))
+                    {
+                        MessageBox.Show(errorMessage ?? "Invalid username or password.", "Login failed", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                        return;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show("Server offline or an error occurred. Please try again later.", "Login failed", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                     return;
                 }
             }

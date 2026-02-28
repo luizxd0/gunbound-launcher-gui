@@ -209,6 +209,7 @@ namespace Launcher
             {
                 if (ex.Response is HttpWebResponse httpResp)
                 {
+                    try { httpResp.Close(); } catch { }
                     int code = (int)httpResp.StatusCode;
                     if (code == 401)
                     {
@@ -219,7 +220,7 @@ namespace Launcher
                     {
                         using (var reader = new StreamReader(httpResp.GetResponseStream(), Encoding.UTF8))
                             errorMessage = reader.ReadToEnd();
-                        if (errorMessage.Length > 200) errorMessage = errorMessage.Substring(0, 200);
+                        if (errorMessage != null && errorMessage.Length > 200) errorMessage = errorMessage.Substring(0, 200);
                     }
                     catch
                     {
@@ -227,7 +228,8 @@ namespace Launcher
                     }
                     return false;
                 }
-                errorMessage = ex.Message ?? "Could not reach the login server. Please check your connection and try again.";
+                // No response: server unreachable, timeout, connection refused, etc.
+                errorMessage = "Server offline or unreachable. Please try again later.";
                 return false;
             }
             catch (Exception ex)
