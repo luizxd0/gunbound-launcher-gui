@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Data;
@@ -320,7 +320,8 @@ namespace Launcher
 
         private void MainForm_Load(object sender, EventArgs e)
         {
-            SetNoticeURL(Application.StartupPath + "\\notice.html");
+            string appBase = Application.StartupPath + "\\";
+            SetNoticeURL(GunBoundLauncher.GetNoticeUrl(appBase));
             ChangeLauncherState(LauncherState.AWAITING_LOGIN);
         }
 
@@ -367,8 +368,26 @@ namespace Launcher
             {
                 return;
             }
-            string username = txtUsername.Text;
-            string password = txtPassword.Text;
+            string username = (txtUsername.Text ?? "").Trim();
+            string password = txtPassword.Text ?? "";
+
+            if (string.IsNullOrEmpty(username) || string.IsNullOrEmpty(password))
+            {
+                MessageBox.Show("Please enter your username and password.", "Login", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            string appBase = Application.StartupPath + "\\";
+            string loginCheckUrl = GunBoundLauncher.GetLoginCheckUrl(appBase);
+            if (!string.IsNullOrEmpty(loginCheckUrl))
+            {
+                string errorMessage;
+                if (!GunBoundLauncher.VerifyCredentials(username, password, loginCheckUrl, out errorMessage))
+                {
+                    MessageBox.Show(errorMessage ?? "Invalid username or password.", "Login failed", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+            }
 
             GunBoundLauncher.LaunchGame(username, password);
         }

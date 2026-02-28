@@ -1,4 +1,7 @@
 [URLs]
+# News/notice shown in the launcher panel (local file or http(s) URL). If omitted, uses notice.html in the launcher folder.
+Notice=.\notice.html
+# Patch/update (used when version-check and patching logic is implemented)
 Manifest=http://update.gunbound.site/update/file-list.txt
 BaseFiles=http://update.gunbound.site/update/gamefiles/
 LauncherVersion=http://update.gunbound.site/update/launcher-version.txt
@@ -8,10 +11,14 @@ LastID=test
 BuddyIP=127.0.0.1
 ServerIP=127.0.0.1
 BaseUrl=http://update.gunbound.site
+# Optional: URL to verify username/password before starting the game. Launcher POSTs username and password (form-encoded). 200 = OK, 401 = invalid. If omitted, the launcher does not verify and starts the game immediately.
+# LoginCheckUrl=http://yourserver.com/api/login-check
 
 [Screen]
-WindowedMode=1
-# Optional: path to dxwnd.exe to launch game in a window (e.g. DxWndPath=dxwnd.exe). Else use cnc-ddraw ddraw.dll in the game folder.
+# 0 = fullscreen (default), 1 = windowed (requires dxwnd.dll or ddraw.dll in game folder, or DxWndPath)
+# For fullscreen: ensure no ddraw.dll or dxwnd.dll is in the game folder, or the game may still run in a window.
+WindowedMode=0
+# Optional: path to dxwnd.exe when using windowed mode (e.g. DxWndPath=dxwnd.exe)
 
 [GameConfig]
 Effect3D=3

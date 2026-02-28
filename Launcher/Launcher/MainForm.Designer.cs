@@ -1,4 +1,4 @@
-﻿namespace Launcher
+namespace Launcher
 {
     partial class MainForm
     {
@@ -118,6 +118,7 @@
             this.wbNotice.Location = new System.Drawing.Point(10, 26);
             this.wbNotice.MinimumSize = new System.Drawing.Size(20, 20);
             this.wbNotice.Name = "wbNotice";
+            this.wbNotice.ScriptErrorsSuppressed = true;
             this.wbNotice.ScrollBarsEnabled = false;
             this.wbNotice.Size = new System.Drawing.Size(364, 322);
             this.wbNotice.TabIndex = 3;

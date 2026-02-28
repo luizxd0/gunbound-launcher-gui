@@ -8,6 +8,7 @@ using System.Diagnostics;
 using System.Security.Cryptography;
 using System.IO;
 using System.Windows.Forms;
+using System.Net;
 
 namespace Launcher
 {
@@ -134,6 +135,108 @@ namespace Launcher
             return int.TryParse(s, out int v) ? v : defaultValue;
         }
 
+        /// <summary>Returns the notice/news URL from Launcher.ini ([URLs] Notice or [LauncherConfig] NoticeURL), or a default local notice.html path.</summary>
+        public static string GetNoticeUrl(string appBasePath)
+        {
+            var config = ReadIniConfig(appBasePath);
+            string notice = IniGet(config, "URLs", "Notice", null);
+            if (string.IsNullOrEmpty(notice))
+                notice = IniGet(config, "LauncherConfig", "NoticeURL", null);
+            if (string.IsNullOrEmpty(notice))
+                return appBasePath + "notice.html";
+            // Allow relative path (e.g. .\notice.html or notice.html)
+            if (!notice.StartsWith("http://", StringComparison.OrdinalIgnoreCase) && !notice.StartsWith("https://", StringComparison.OrdinalIgnoreCase) && !Path.IsPathRooted(notice))
+                notice = Path.Combine(appBasePath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar), notice);
+            return notice;
+        }
+
+        /// <summary>Returns the login-check URL from Launcher.ini ([URLs] LoginCheckUrl or [LauncherConfig] LoginCheckUrl). Empty = no verification.</summary>
+        public static string GetLoginCheckUrl(string appBasePath)
+        {
+            var config = ReadIniConfig(appBasePath);
+            string url = IniGet(config, "URLs", "LoginCheckUrl", null);
+            if (string.IsNullOrEmpty(url))
+                url = IniGet(config, "LauncherConfig", "LoginCheckUrl", null);
+            return (url ?? "").Trim();
+        }
+
+        /// <summary>Verifies username/password with the server. POSTs application/x-www-form-urlencoded username and password. Returns true if 2xx, false otherwise with errorMessage set.</summary>
+        public static bool VerifyCredentials(string username, string password, string loginCheckUrl, out string errorMessage)
+        {
+            errorMessage = null;
+            if (string.IsNullOrEmpty(loginCheckUrl))
+            {
+                errorMessage = "Login check URL is not configured.";
+                return false;
+            }
+            try
+            {
+                var request = (HttpWebRequest)WebRequest.Create(loginCheckUrl);
+                request.Method = "POST";
+                request.ContentType = "application/x-www-form-urlencoded";
+                request.Timeout = 15000;
+                request.ReadWriteTimeout = 15000;
+                string postData = "username=" + Uri.EscapeDataString(username ?? "") + "&password=" + Uri.EscapeDataString(password ?? "");
+                byte[] postBytes = Encoding.UTF8.GetBytes(postData);
+                request.ContentLength = postBytes.Length;
+                using (var stream = request.GetRequestStream())
+                    stream.Write(postBytes, 0, postBytes.Length);
+                using (var response = (HttpWebResponse)request.GetResponse())
+                {
+                    int code = (int)response.StatusCode;
+                    if (code >= 200 && code < 300)
+                    {
+                        errorMessage = null;
+                        return true;
+                    }
+                    if (code == 401)
+                    {
+                        errorMessage = "Invalid username or password.";
+                        return false;
+                    }
+                    string body = null;
+                    try
+                    {
+                        using (var reader = new StreamReader(response.GetResponseStream(), Encoding.UTF8))
+                            body = reader.ReadToEnd();
+                    }
+                    catch { }
+                    errorMessage = !string.IsNullOrEmpty(body) && body.Length <= 200 ? body : "Login failed (HTTP " + code + ").";
+                    return false;
+                }
+            }
+            catch (WebException ex)
+            {
+                if (ex.Response is HttpWebResponse httpResp)
+                {
+                    int code = (int)httpResp.StatusCode;
+                    if (code == 401)
+                    {
+                        errorMessage = "Invalid username or password.";
+                        return false;
+                    }
+                    try
+                    {
+                        using (var reader = new StreamReader(httpResp.GetResponseStream(), Encoding.UTF8))
+                            errorMessage = reader.ReadToEnd();
+                        if (errorMessage.Length > 200) errorMessage = errorMessage.Substring(0, 200);
+                    }
+                    catch
+                    {
+                        errorMessage = "Login failed (HTTP " + code + ").";
+                    }
+                    return false;
+                }
+                errorMessage = ex.Message ?? "Could not reach the login server. Please check your connection and try again.";
+                return false;
+            }
+            catch (Exception ex)
+            {
+                errorMessage = ex.Message ?? "An error occurred while verifying your credentials.";
+                return false;
+            }
+        }
+
         static void LaunchGunbound(string binaryPath, string credentialsEncrypted, bool createSuspended, string dllToInject = "")
         {
             int pid = NativeAPI.CreateProcessWrapper(binaryPath, credentialsEncrypted, createSuspended);
@@ -205,13 +308,17 @@ namespace Launcher
 
             Dictionary<string, Dictionary<string, string>> config = ReadIniConfig(appBasePath);
 
-            // [LauncherConfig] ServerIP, BuddyIP
+            // [LauncherConfig] ServerIP, BuddyIP, NoticeURL (for in-game notice; launcher panel uses GetNoticeUrl)
             string serverIP = IniGet(config, "LauncherConfig", "ServerIP", "127.0.0.1");
             string buddyIP = IniGet(config, "LauncherConfig", "BuddyIP", serverIP);
             gbKey.SetValue("IP", serverIP, RegistryValueKind.String);
             gbKey.SetValue("BuddyIP", buddyIP, RegistryValueKind.String);
+            string urlNotice = IniGet(config, "URLs", "Notice", null);
+            if (string.IsNullOrEmpty(urlNotice)) urlNotice = IniGet(config, "LauncherConfig", "NoticeURL", null);
+            if (!string.IsNullOrEmpty(urlNotice))
+                gbKey.SetValue("Url_Notice", urlNotice, RegistryValueKind.String);
 
-            // [Screen] WindowedMode=1 → windowed (FullScreen=0); client may ignore this; use ddraw wrapper or DxWnd for real windowed
+            // [Screen] WindowedMode=0 → fullscreen (default); WindowedMode=1 → windowed (needs dxwnd.dll or ddraw wrapper)
             int windowedMode = IniGetInt(config, "Screen", "WindowedMode", 0);
             gbKey.SetValue("FullScreen", (windowedMode != 0) ? 0 : 1, RegistryValueKind.DWord);
 
@@ -236,49 +343,60 @@ namespace Launcher
                 return;
             }
 
-            // When WindowedMode=1 and dxwnd.dll is in the game folder: inject it so the game runs in a window (dxwnd.dxw holds the config)
-            string dllToInject = IniGet(config, "LauncherConfig", "InjectDll", "").Trim();
+            // Fullscreen (WindowedMode=0): launch with no injection so the game runs in fullscreen.
+            // Windowed (WindowedMode=1): try to inject dxwnd.dll or ddraw.dll, or launch via DxWndPath.
+            string dllToInject = "";
             bool createSuspended = false;
-            if (windowedMode != 0 && File.Exists(appBasePath + "dxwnd.dll"))
-            {
-                dllToInject = appBasePath + "dxwnd.dll";
-                createSuspended = true;
-                Console.WriteLine("Windowed mode: injecting dxwnd.dll (using dxwnd.dxw from game folder)");
-            }
-            else if (dllToInject.Length > 0)
-            {
-                dllToInject = Path.IsPathRooted(dllToInject) ? dllToInject : appBasePath + dllToInject;
-                if (!File.Exists(dllToInject)) dllToInject = "";
-            }
 
-            if (windowedMode != 0 && dllToInject.Length == 0 && !File.Exists(appBasePath + "ddraw.dll"))
+            if (windowedMode != 0)
             {
-                string dxWndPath = IniGet(config, "Screen", "DxWndPath", "").Trim();
-                if (dxWndPath.Length > 0 && !Path.IsPathRooted(dxWndPath))
-                    dxWndPath = appBasePath + dxWndPath;
-                if (File.Exists(dxWndPath))
+                string injectDllConfig = IniGet(config, "LauncherConfig", "InjectDll", "").Trim();
+                // Windowed mode: prefer dxwnd.dll in game folder, else explicit InjectDll
+                if (File.Exists(appBasePath + "dxwnd.dll"))
                 {
-                    try
-                    {
-                        var psi = new ProcessStartInfo
-                        {
-                            FileName = dxWndPath,
-                            Arguments = "\"" + binaryPath + "\" " + credentialsEncrypted,
-                            WorkingDirectory = appBasePath,
-                            UseShellExecute = false
-                        };
-                        Process.Start(psi);
-                        Environment.Exit(0);
-                        return;
-                    }
-                    catch (Exception ex) { Console.WriteLine("DxWnd launch failed: " + ex.Message); }
+                    dllToInject = appBasePath + "dxwnd.dll";
+                    createSuspended = true;
+                    Console.WriteLine("Windowed mode: injecting dxwnd.dll");
                 }
-                MessageBox.Show(
-                    "Windowed mode is set. Put dxwnd.dll (and dxwnd.dxw) from the other client into this game folder, or use cnc-ddraw ddraw.dll. See SETUP.md.",
-                    "Windowed mode",
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Information);
+                else if (injectDllConfig.Length > 0)
+                {
+                    dllToInject = Path.IsPathRooted(injectDllConfig) ? injectDllConfig : appBasePath + injectDllConfig;
+                    if (File.Exists(dllToInject))
+                        createSuspended = true;
+                    else
+                        dllToInject = "";
+                }
+
+                if (dllToInject.Length == 0 && !File.Exists(appBasePath + "ddraw.dll"))
+                {
+                    string dxWndPath = IniGet(config, "Screen", "DxWndPath", "").Trim();
+                    if (dxWndPath.Length > 0 && !Path.IsPathRooted(dxWndPath))
+                        dxWndPath = appBasePath + dxWndPath;
+                    if (File.Exists(dxWndPath))
+                    {
+                        try
+                        {
+                            var psi = new ProcessStartInfo
+                            {
+                                FileName = dxWndPath,
+                                Arguments = "\"" + binaryPath + "\" " + credentialsEncrypted,
+                                WorkingDirectory = appBasePath,
+                                UseShellExecute = false
+                            };
+                            Process.Start(psi);
+                            Environment.Exit(0);
+                            return;
+                        }
+                        catch (Exception ex) { Console.WriteLine("DxWnd launch failed: " + ex.Message); }
+                    }
+                    MessageBox.Show(
+                        "Windowed mode is set but no windowed support found. Put dxwnd.dll (and dxwnd.dxw) in the game folder, or add ddraw.dll (e.g. cnc-ddraw), or set [LauncherConfig] InjectDll to your ddraw path.",
+                        "Windowed mode",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Information);
+                }
             }
+            // WindowedMode=0: never inject; launch game normally. WindowedMode=1: use dxwnd/InjectDll/ddraw as above.
 
             LaunchGunbound(binaryPath, credentialsEncrypted, createSuspended, dllToInject);
 
