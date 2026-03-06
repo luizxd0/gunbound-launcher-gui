@@ -7,6 +7,7 @@ using System.Linq;
 using System.Text;
 using System.Windows.Forms;
 using System.Runtime.InteropServices;
+using System.IO;
 
 namespace Launcher
 {
@@ -323,6 +324,142 @@ namespace Launcher
             string appBase = Application.StartupPath + "\\";
             SetNoticeURL(GunBoundLauncher.GetNoticeUrl(appBase));
             ChangeLauncherState(LauncherState.AWAITING_LOGIN);
+
+            string lastId = ReadIniValue(GetLauncherIniPath(), "LauncherConfig", "LastID", "");
+            if (!string.IsNullOrWhiteSpace(lastId))
+                txtUsername.Text = lastId.Trim();
+        }
+
+        private static string GetLauncherIniPath()
+        {
+            return Path.Combine(Application.StartupPath, "Launcher.ini");
+        }
+
+        private static string ReadIniValue(string iniPath, string section, string key, string defaultValue)
+        {
+            try
+            {
+                if (!File.Exists(iniPath))
+                    return defaultValue;
+
+                string currentSection = "";
+                string[] lines = File.ReadAllLines(iniPath);
+                for (int i = 0; i < lines.Length; i++)
+                {
+                    string trimmed = (lines[i] ?? "").Trim();
+                    if (trimmed.Length == 0 || trimmed.StartsWith(";") || trimmed.StartsWith("#"))
+                        continue;
+
+                    if (trimmed.StartsWith("[") && trimmed.EndsWith("]"))
+                    {
+                        currentSection = trimmed.Substring(1, trimmed.Length - 2).Trim();
+                        continue;
+                    }
+
+                    if (!string.Equals(currentSection, section, StringComparison.OrdinalIgnoreCase))
+                        continue;
+
+                    int eq = trimmed.IndexOf('=');
+                    if (eq < 0)
+                        continue;
+
+                    string parsedKey = trimmed.Substring(0, eq).Trim();
+                    if (!string.Equals(parsedKey, key, StringComparison.OrdinalIgnoreCase))
+                        continue;
+
+                    return trimmed.Substring(eq + 1).Trim();
+                }
+            }
+            catch
+            {
+            }
+
+            return defaultValue;
+        }
+
+        private static void WriteIniValue(string iniPath, string section, string key, string value)
+        {
+            try
+            {
+                List<string> lines = File.Exists(iniPath)
+                    ? new List<string>(File.ReadAllLines(iniPath))
+                    : new List<string>();
+
+                string targetSection = "[" + section + "]";
+                int sectionStart = -1;
+                int sectionEnd = lines.Count;
+
+                for (int i = 0; i < lines.Count; i++)
+                {
+                    string trimmed = (lines[i] ?? "").Trim();
+                    if (!(trimmed.StartsWith("[") && trimmed.EndsWith("]")))
+                        continue;
+
+                    if (sectionStart < 0)
+                    {
+                        if (string.Equals(trimmed, targetSection, StringComparison.OrdinalIgnoreCase))
+                            sectionStart = i;
+                    }
+                    else
+                    {
+                        sectionEnd = i;
+                        break;
+                    }
+                }
+
+                if (sectionStart < 0)
+                {
+                    if (lines.Count > 0 && (lines[lines.Count - 1] ?? "").Trim().Length != 0)
+                        lines.Add("");
+                    lines.Add(targetSection);
+                    lines.Add(key + "=" + (value ?? ""));
+                    File.WriteAllLines(iniPath, lines.ToArray());
+                    return;
+                }
+
+                int keyLine = -1;
+                for (int i = sectionStart + 1; i < sectionEnd; i++)
+                {
+                    string trimmed = (lines[i] ?? "").Trim();
+                    if (trimmed.Length == 0 || trimmed.StartsWith(";") || trimmed.StartsWith("#"))
+                        continue;
+
+                    int eq = trimmed.IndexOf('=');
+                    if (eq < 0)
+                        continue;
+
+                    string parsedKey = trimmed.Substring(0, eq).Trim();
+                    if (!string.Equals(parsedKey, key, StringComparison.OrdinalIgnoreCase))
+                        continue;
+
+                    keyLine = i;
+                    break;
+                }
+
+                string newLine = key + "=" + (value ?? "");
+                if (keyLine >= 0)
+                {
+                    lines[keyLine] = newLine;
+                }
+                else
+                {
+                    int insertAt = sectionEnd;
+                    while (insertAt > sectionStart + 1 && string.IsNullOrWhiteSpace(lines[insertAt - 1]))
+                        insertAt--;
+                    lines.Insert(insertAt, newLine);
+                }
+
+                File.WriteAllLines(iniPath, lines.ToArray());
+            }
+            catch
+            {
+            }
+        }
+
+        private string GetPortalUrl()
+        {
+            string appBase = Application.StartupPath + "\\";
+            return GunBoundLauncher.GetBaseUrl(appBase);
         }
 
         // Cancel update button, shown during version check AND update
@@ -338,21 +475,20 @@ namespace Launcher
         // Full download button from LauncherState.FULL_DOWNLOAD_REQUIRED
         private void BtnFullDownload_Click(object sender, EventArgs e)
         {
-            // Change this to your full client download URL
-            System.Diagnostics.Process.Start("https://google.com#full_download");
+            System.Diagnostics.Process.Start(GetPortalUrl());
             Application.Exit();
         }
 
         // New ID
         private void BtnRegister_Click(object sender, EventArgs e)
         {
-            System.Diagnostics.Process.Start("https://google.com#register");
+            System.Diagnostics.Process.Start(GetPortalUrl());
         }
 
         // Forgot Password
         private void BtnForgetPassword_Click(object sender, EventArgs e)
         {
-            System.Diagnostics.Process.Start("https://google.com#forgot_pwd");
+            System.Diagnostics.Process.Start(GetPortalUrl());
         }
 
         // Start Game Button
@@ -370,6 +506,9 @@ namespace Launcher
             }
             string username = (txtUsername.Text ?? "").Trim();
             string password = txtPassword.Text ?? "";
+
+            if (!string.IsNullOrEmpty(username))
+                WriteIniValue(GetLauncherIniPath(), "LauncherConfig", "LastID", username);
 
             if (string.IsNullOrEmpty(username) || string.IsNullOrEmpty(password))
             {
@@ -437,8 +576,15 @@ namespace Launcher
 
         private void BtnOption_Click(object sender, EventArgs e)
         {
-            KitchenSink kitchenSink = new KitchenSink();
-            kitchenSink.Show();
+            if ((ModifierKeys & (Keys.Control | Keys.Shift)) == (Keys.Control | Keys.Shift))
+            {
+                KitchenSink kitchenSink = new KitchenSink();
+                kitchenSink.Show();
+                return;
+            }
+
+            OptionsForm options = new OptionsForm();
+            options.ShowDialog(this);
         }
 
         public void SetNoticeURL(string newUrl)

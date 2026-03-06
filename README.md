@@ -31,8 +31,18 @@ Create `Launcher.ini` from `Launcher.ini.example`. Main sections:
   Until then, the launcher goes straight to the login screen.
 
 - **Login verification:** Set `[URLs] LoginCheckUrl=` or `[LauncherConfig] LoginCheckUrl=` to an HTTP(S) URL. When the user clicks "Game Start", the launcher POSTs `username` and `password` (form-encoded) to that URL. Your server should return **200** for valid credentials and **401** (or any non-2xx) for invalid. If the URL is omitted, the launcher does not verify and starts the game immediately.
+- **Input:** Optional `[LauncherConfig] ForceCapsLockOff=1` (default behavior) turns Caps Lock off before launching the client, to reduce false caps-lock warnings in legacy UI.
 
-- **Screen:** `[Screen] WindowedMode=0` (fullscreen, default) or `1` (windowed; requires dxwnd.dll or ddraw.dll in the game folder).
+- **Screen:**  
+  - Set `DisplayProfile=` (`fullscreen_voodoo2` default/recommended, `fullscreen` native, `windowed`).  
+  - Legacy profiles (`fullscreen_dxwnd`, `fullscreen_compat`, `compact`, and numeric `2/4`) are mapped to `fullscreen_voodoo2`.
+  - Profile files are copied from `compat\...` into the game folder at launch (matching `agasready/gunbound_launcher` behavior). See `Launcher.ini.example` for folder mapping.  
+  - You can reuse profile files from https://github.com/agasready/gunbound_launcher/tree/main/compat.
+  - Windowed mode is forced to `800x600` for stability. `1024x768` selection is ignored in windowed mode.
+  - Selected `GraphResolution` is also applied to wrapper config files (`dxwnd.dxw`, `windowed.ini`, `DdrawCompat.ini`) when present.
+  - For DxWnd proxy mode, the launcher rewrites `dxwnd.dxw` with explicit `path0`, `startfolder0`, and `launchpath0` for the current `GunBound.gme` path (legacy malformed entries are normalized automatically).
+  - Launcher also tries to clear Windows `AppCompatFlags\Layers` overrides for `GunBound.gme` (e.g. `DWM8And16BitMitigation`) because those can force letterboxed/compat-like rendering regardless of selected mode.
+  - A runtime trace is written to `launcher-debug.log` next to `Launcher.exe` for troubleshooting mode selection and backend decisions.
 
 - **Server / game:** `[LauncherConfig] ServerIP=`, `BuddyIP=`, and optional `[GameConfig]` as in the example.
 

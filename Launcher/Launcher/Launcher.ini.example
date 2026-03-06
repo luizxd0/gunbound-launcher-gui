@@ -7,18 +7,27 @@ BaseFiles=http://update.gunbound.site/update/gamefiles/
 LauncherVersion=http://update.gunbound.site/update/launcher-version.txt
 
 [LauncherConfig]
-LastID=test
-BuddyIP=127.0.0.1
-ServerIP=127.0.0.1
-BaseUrl=http://update.gunbound.site
+LastID=
+BuddyIP=classic-gunbound.servegame.com
+ServerIP=classic-gunbound.servegame.com
+BaseUrl=http://classic-gunbound.servegame.com
+# Optional: force Caps Lock off just before launching the game (1=on, 0=off)
+# ForceCapsLockOff=1
 # Optional: URL to verify username/password before starting the game. Launcher POSTs username and password (form-encoded). 200 = OK, 401 = invalid. If omitted, the launcher does not verify and starts the game immediately.
-# LoginCheckUrl=http://yourserver.com/api/login-check
+# LoginCheckUrl=http://classic-gunbound.servegame.com/api/login-check
 
 [Screen]
-# 0 = fullscreen (default), 1 = windowed (requires dxwnd.dll or ddraw.dll in game folder, or DxWndPath)
-# For fullscreen: ensure no ddraw.dll or dxwnd.dll is in the game folder, or the game may still run in a window.
-WindowedMode=0
-# Optional: path to dxwnd.exe when using windowed mode (e.g. DxWndPath=dxwnd.exe)
+# Player-facing display setting:
+# - fullscreen_voodoo2 (default/recommended fullscreen profile)
+# - fullscreen (native)
+# - windowed
+# Legacy aliases (1/2/4, voodoo2/dxwnd/compat/compact) are mapped to fullscreen_voodoo2.
+DisplayProfile=fullscreen_voodoo2
+# Profile folders (copied to game folder before launch):
+# compat\3 or compat\windowed           -> windowed
+# compat\1 or compat\fullscreen_voodoo2 -> fullscreen voodoo2
+# Advanced internal options exist but are intentionally hidden from players.
+# Windowed mode auto-normalizes dxwnd.dxw path0/startfolder0/launchpath0 at launch.
 
 [GameConfig]
 Effect3D=3
