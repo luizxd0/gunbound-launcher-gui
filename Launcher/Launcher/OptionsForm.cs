@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.IO;
+using System.Net;
 using System.Text;
 using System.Windows.Forms;
 
@@ -9,6 +10,8 @@ namespace Launcher
 {
     public class OptionsForm : Form
     {
+        const string OptionsBannerUrl = "http://classic-gunbound.servegame.com/images/logo_options.png";
+
         class ResolutionOption
         {
             public int Value;
@@ -273,6 +276,47 @@ namespace Launcher
         {
             _ini = ReadIniConfig(_configPath);
             ApplyIniToUi();
+            LoadBannerFromWebsite();
+        }
+
+        void LoadBannerFromWebsite()
+        {
+            Image remoteBanner = TryLoadImageFromUrl(OptionsBannerUrl);
+            if (remoteBanner == null)
+                return;
+
+            Image previous = pbBanner.Image;
+            pbBanner.Image = remoteBanner;
+            pbBanner.SizeMode = PictureBoxSizeMode.StretchImage;
+
+            if (previous != null && previous != Properties.Resources.frame)
+                previous.Dispose();
+        }
+
+        Image TryLoadImageFromUrl(string imageUrl)
+        {
+            try
+            {
+                HttpWebRequest request = (HttpWebRequest)WebRequest.Create(imageUrl);
+                request.Method = "GET";
+                request.Timeout = 3000;
+                request.ReadWriteTimeout = 3000;
+                request.Proxy = null;
+                request.UserAgent = "GBTH-Launcher/1.0";
+
+                using (HttpWebResponse response = (HttpWebResponse)request.GetResponse())
+                using (Stream responseStream = response.GetResponseStream())
+                {
+                    if (responseStream == null)
+                        return null;
+                    using (Image image = Image.FromStream(responseStream))
+                        return new Bitmap(image);
+                }
+            }
+            catch
+            {
+                return null;
+            }
         }
 
         void ApplyIniToUi()

@@ -24,6 +24,13 @@ namespace Launcher
         const int WM_SETICON = 0x0080;
         const int ICON_SMALL = 0;
         const int ICON_BIG = 1;
+        const int DXWND_FLAGS3_MARKBLIT = 0x00000002;
+        const int DXWND_FLAGS3_HOOKDLLS = 0x00000004;
+        const int DXWND_FLAGS3_HOOKENABLED = 0x00000010;
+        const int DXWND_FLAGS4_HOTPATCH = 0x04000000;
+        const int DXWND_FLAGS5_AEROBOOST = 0x00000080;
+        const int DXWND_FLAGS5_MESSAGEPUMP = 0x04000000;
+        const int DXWND_FLAGS8_FIXMOUSEHOOK = 0x00000800;
         static IntPtr _cachedGameIconHandle = IntPtr.Zero;
 
         [DllImport("user32.dll")]
@@ -40,12 +47,7 @@ namespace Launcher
 
         static void WriteDebugLog(string appBasePath, string message)
         {
-            try
-            {
-                string line = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff") + " " + message + Environment.NewLine;
-                File.AppendAllText(Path.Combine(appBasePath, "launcher-debug.log"), line);
-            }
-            catch { }
+            // Debug logging disabled by request.
         }
 
         private static byte[] AesEncryptBlock(byte[] plainText, byte[] Key)
@@ -515,23 +517,6 @@ namespace Launcher
             }
         }
 
-        static bool LooksLikeUnnamedDxwndPathLine(string line)
-        {
-            if (string.IsNullOrWhiteSpace(line))
-                return false;
-
-            string trimmed = line.Trim();
-            if (trimmed.Length < 3)
-                return false;
-            if (trimmed.IndexOf('=') >= 0)
-                return false;
-            if (trimmed.StartsWith("[") || trimmed.StartsWith(";") || trimmed.StartsWith("#"))
-                return false;
-
-            // Typical legacy line format from old profiles: C:\SomeFolder\Game.exe
-            return char.IsLetter(trimmed[0]) && trimmed[1] == ':' && (trimmed[2] == '\\' || trimmed[2] == '/');
-        }
-
         static void ApplyDxwndProfileSettings(string filePath, int width, int height, string binaryPath, string appBasePath)
         {
             try
@@ -540,66 +525,16 @@ namespace Launcher
                     return;
 
                 string[] lines = File.ReadAllLines(filePath);
-                string normalizedBinaryPath = Path.GetFullPath(binaryPath);
-                string normalizedStartFolder = Path.GetFullPath(appBasePath).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-
-                var output = new List<string>(lines.Length + 12);
-                bool hasPath0 = false;
-                bool hasLaunchPath0 = false;
-                bool hasStartFolder0 = false;
+                var output = new List<string>(lines.Length + 6);
                 bool hasSizx0 = false;
                 bool hasSizy0 = false;
                 bool hasInitResW0 = false;
                 bool hasInitResH0 = false;
-                int unnamedPathIndex = 0;
 
                 for (int i = 0; i < lines.Length; i++)
                 {
                     string trimmed = (lines[i] ?? "").Trim();
-
-                    if (LooksLikeUnnamedDxwndPathLine(trimmed))
-                    {
-                        if (unnamedPathIndex == 0 && !hasPath0)
-                        {
-                            output.Add("path0=" + normalizedBinaryPath);
-                            hasPath0 = true;
-                            unnamedPathIndex++;
-                            continue;
-                        }
-                        if (unnamedPathIndex == 1 && !hasLaunchPath0)
-                        {
-                            output.Add("launchpath0=" + normalizedBinaryPath);
-                            hasLaunchPath0 = true;
-                            unnamedPathIndex++;
-                            continue;
-                        }
-                    }
-
-                    if (trimmed.StartsWith("path0=", StringComparison.OrdinalIgnoreCase))
-                    {
-                        if (!hasPath0)
-                        {
-                            output.Add("path0=" + normalizedBinaryPath);
-                            hasPath0 = true;
-                        }
-                    }
-                    else if (trimmed.StartsWith("launchpath0=", StringComparison.OrdinalIgnoreCase))
-                    {
-                        if (!hasLaunchPath0)
-                        {
-                            output.Add("launchpath0=" + normalizedBinaryPath);
-                            hasLaunchPath0 = true;
-                        }
-                    }
-                    else if (trimmed.StartsWith("startfolder0=", StringComparison.OrdinalIgnoreCase))
-                    {
-                        if (!hasStartFolder0)
-                        {
-                            output.Add("startfolder0=" + normalizedStartFolder);
-                            hasStartFolder0 = true;
-                        }
-                    }
-                    else if (trimmed.StartsWith("sizx0=", StringComparison.OrdinalIgnoreCase))
+                    if (trimmed.StartsWith("sizx0=", StringComparison.OrdinalIgnoreCase))
                     {
                         if (!hasSizx0)
                         {
@@ -637,12 +572,6 @@ namespace Launcher
                     }
                 }
 
-                if (!hasPath0)
-                    output.Add("path0=" + normalizedBinaryPath);
-                if (!hasStartFolder0)
-                    output.Add("startfolder0=" + normalizedStartFolder);
-                if (!hasLaunchPath0)
-                    output.Add("launchpath0=" + normalizedBinaryPath);
                 if (!hasSizx0)
                     output.Add("sizx0=" + width);
                 if (!hasSizy0)
@@ -673,6 +602,66 @@ namespace Launcher
             ApplyKeyValueFileSetting(windowedIni, "width", width.ToString());
             ApplyKeyValueFileSetting(windowedIni, "height", height.ToString());
             ApplyKeyValueFileSetting(ddrawCompat, "DisplayResolution", width + "x" + height);
+        }
+
+        static int ReadKeyValueFileInt(string filePath, string key, int defaultValue)
+        {
+            try
+            {
+                if (!File.Exists(filePath))
+                    return defaultValue;
+
+                string[] lines = File.ReadAllLines(filePath);
+                for (int i = 0; i < lines.Length; i++)
+                {
+                    string line = lines[i] ?? "";
+                    string trimmed = line.TrimStart();
+                    if (!trimmed.StartsWith(key, StringComparison.OrdinalIgnoreCase))
+                        continue;
+
+                    int eq = line.IndexOf('=');
+                    if (eq < 0)
+                        continue;
+
+                    int value;
+                    if (int.TryParse(line.Substring(eq + 1).Trim(), out value))
+                        return value;
+                }
+            }
+            catch { }
+
+            return defaultValue;
+        }
+
+        static void ApplyDxwndStabilitySettings(string appBasePath, bool disableHookAllDlls)
+        {
+            string dxwnd = Path.Combine(appBasePath, "dxwnd.dxw");
+            if (!File.Exists(dxwnd))
+                return;
+
+            // Stabilize DxWnd input/hook behavior for GunBound world-list interactions.
+            int flags3 = ReadKeyValueFileInt(dxwnd, "flagh0", DXWND_FLAGS3_HOOKENABLED | DXWND_FLAGS3_HOOKDLLS);
+            flags3 |= DXWND_FLAGS3_HOOKENABLED;
+            flags3 &= ~DXWND_FLAGS3_MARKBLIT;
+            if (disableHookAllDlls)
+                flags3 &= ~DXWND_FLAGS3_HOOKDLLS;
+            else
+                flags3 |= DXWND_FLAGS3_HOOKDLLS;
+
+            int flags4 = ReadKeyValueFileInt(dxwnd, "flagi0", 0);
+            flags4 |= DXWND_FLAGS4_HOTPATCH;
+
+            int flags5 = ReadKeyValueFileInt(dxwnd, "flagj0", 0);
+            flags5 |= DXWND_FLAGS5_AEROBOOST;
+            flags5 |= DXWND_FLAGS5_MESSAGEPUMP;
+
+            int flags8 = ReadKeyValueFileInt(dxwnd, "flagm0", 0);
+            flags8 |= DXWND_FLAGS8_FIXMOUSEHOOK;
+
+            ApplyKeyValueFileSetting(dxwnd, "flagh0", flags3.ToString());
+            ApplyKeyValueFileSetting(dxwnd, "flagi0", flags4.ToString());
+            ApplyKeyValueFileSetting(dxwnd, "flagj0", flags5.ToString());
+            ApplyKeyValueFileSetting(dxwnd, "flagm0", flags8.ToString());
         }
 
         static void ApplyFullscreenCompatTweaks(string appBasePath, Dictionary<string, Dictionary<string, string>> config)
@@ -962,14 +951,12 @@ namespace Launcher
             else
                 gbKey.SetValue("Url_Notice", baseUrl, RegistryValueKind.String);
 
-            // [Screen] WindowedMode=0 → fullscreen (default); WindowedMode=1 → windowed (needs dxwnd.dll or ddraw wrapper)
+            // [Screen] WindowedMode=0 -> fullscreen (default); WindowedMode=1 -> windowed (requires DxWnd proxy files)
             int windowedMode = IniGetInt(config, "Screen", "WindowedMode", 0);
             int fullScreenCompat = IniGetInt(config, "Screen", "FullScreenCompat", 0);
             string displayProfile = IniGet(config, "Screen", "DisplayProfile", "");
             string deleteGraphicsRaw = IniGet(config, "Screen", "DeleteGraphicsDll", null);
-            string windowedBackend = (IniGet(config, "Screen", "WindowedBackend", "auto") ?? "").Trim().ToLowerInvariant();
-            if (windowedBackend != "auto" && windowedBackend != "ddraw" && windowedBackend != "dxwnd" && windowedBackend != "inject")
-                windowedBackend = "auto";
+            string windowedBackend = "dxwnd";
             int graphResolution = IniGetInt(config, "GameConfig", "GraphResolution", 0);
 
             string normalizedProfile = (displayProfile ?? "").Trim().ToLowerInvariant();
@@ -977,6 +964,7 @@ namespace Launcher
             {
                 windowedMode = 1;
                 fullScreenCompat = 0;
+                windowedBackend = "dxwnd";
             }
             else if (normalizedProfile == "fullscreen" || normalizedProfile == "native" || normalizedProfile == "fullscreen_native")
             {
@@ -998,6 +986,15 @@ namespace Launcher
                 normalizedProfile = "fullscreen_voodoo2";
                 displayProfile = "fullscreen_voodoo2";
             }
+            else
+            {
+                windowedBackend = (IniGet(config, "Screen", "WindowedBackend", "dxwnd") ?? "").Trim().ToLowerInvariant();
+                if (windowedBackend != "auto" && windowedBackend != "ddraw" && windowedBackend != "dxwnd" && windowedBackend != "inject")
+                    windowedBackend = "dxwnd";
+            }
+
+            if (windowedMode != 0)
+                windowedBackend = "dxwnd";
 
             if (windowedMode != 0 && graphResolution != 0)
             {
@@ -1023,6 +1020,12 @@ namespace Launcher
                 deleteGraphicsDllForProfile = int.TryParse(deleteGraphicsRaw, out del) && del != 0;
             }
 
+            if (windowedMode != 0)
+            {
+                // Windowed DxWnd profile is more stable without client graphics.dll overlays.
+                deleteGraphicsDllForProfile = true;
+            }
+
             string appliedProfile;
             string profileError;
             if (!TryApplyDisplayProfile(appBasePath, windowedMode, fullScreenCompat, displayProfile, deleteGraphicsDllForProfile, out appliedProfile, out profileError))
@@ -1038,34 +1041,24 @@ namespace Launcher
             if (!deleteGraphicsDllForProfile)
                 EnsureGraphicsDllPresent(appBasePath);
 
+            if (windowedMode != 0)
+            {
+                int dxwndDisableHookAllDlls = IniGetInt(config, "Screen", "DxwndDisableHookDlls", 1);
+                ApplyDxwndStabilitySettings(appBasePath, dxwndDisableHookAllDlls != 0);
+            }
+
             bool hasDdrawAfterProfile = File.Exists(appBasePath + "ddraw.dll");
             bool hasDxwndAfterProfile = File.Exists(appBasePath + "dxwnd.dll");
             string effectiveWindowedBackend = windowedBackend;
 
             WriteDebugLog(appBasePath, "Config normalized: profile=" + normalizedProfile + " windowedMode=" + windowedMode + " fullScreenCompat=" + fullScreenCompat + " windowedBackend=" + windowedBackend + " effectiveBackend=" + effectiveWindowedBackend + " graphResolution=" + graphResolution + " deleteGraphics=" + deleteGraphicsDllForProfile);
 
-            string windowedRegistryFullscreen = (IniGet(config, "Screen", "WindowedRegistryFullscreen", "auto") ?? "").Trim().ToLowerInvariant();
+            string windowedRegistryFullscreen = (IniGet(config, "Screen", "WindowedRegistryFullscreen", "0") ?? "").Trim().ToLowerInvariant();
             int fullScreenRegistry = (windowedMode != 0) ? 0 : 1;
             if (windowedMode != 0)
             {
-                if (windowedRegistryFullscreen == "1" || windowedRegistryFullscreen == "true" || windowedRegistryFullscreen == "fullscreen")
-                {
-                    fullScreenRegistry = 1;
-                }
-                else if (windowedRegistryFullscreen == "0" || windowedRegistryFullscreen == "false" || windowedRegistryFullscreen == "windowed")
-                {
-                    fullScreenRegistry = 0;
-                }
-                else
-                {
-                    // Auto strategy:
-                    // For ddraw wrappers, keep the legacy internal fullscreen path.
-                    // For dxwnd-style wrappers, prefer native windowed registry mode.
-                    if (effectiveWindowedBackend == "ddraw" || (effectiveWindowedBackend == "auto" && hasDdrawAfterProfile))
-                        fullScreenRegistry = 1;
-                    else
-                        fullScreenRegistry = 0;
-                }
+                // ddraw proxy windowed mode is most stable when legacy fullscreen path is enabled.
+                fullScreenRegistry = hasDdrawAfterProfile ? 1 : 0;
             }
             gbKey.SetValue("FullScreen", fullScreenRegistry, RegistryValueKind.DWord);
             Console.WriteLine("Registry: FullScreen=" + fullScreenRegistry + " (ddraw=" + hasDdrawAfterProfile + ", dxwnd=" + hasDxwndAfterProfile + ", backend=" + effectiveWindowedBackend + ", windowedRegistryFullscreen=" + windowedRegistryFullscreen + ")");
@@ -1093,14 +1086,10 @@ namespace Launcher
 
             CleanupEphemeralLaunchBinaries(appBasePath);
 
-            if (!ClearGunBoundAppCompatLayers(binaryPath))
-            {
-                Console.WriteLine("AppCompat: could not clear all layers for " + binaryPath + ". Launching original binary.");
-                WriteDebugLog(appBasePath, "AppCompat layers could not be fully cleared; launching original binary");
-            }
+            // Preserve user/system compatibility layers for the game binary.
 
             // Fullscreen (WindowedMode=0): launch with no injection so the game runs in fullscreen.
-            // Windowed (WindowedMode=1): try to inject dxwnd.dll or ddraw.dll, or launch via DxWndPath.
+            // Windowed (WindowedMode=1): launch with a fixed DxWnd proxy setup (ddraw + dxwnd profile).
             string dllToInject = "";
             bool createSuspended = false;
 
@@ -1109,82 +1098,24 @@ namespace Launcher
                 bool hasDdraw = File.Exists(appBasePath + "ddraw.dll");
                 bool hasDxwnd = File.Exists(appBasePath + "dxwnd.dll");
                 bool hasDxwndProfile = File.Exists(appBasePath + "dxwnd.dxw");
-                bool forceInject = effectiveWindowedBackend == "inject";
-                bool forceProxy = effectiveWindowedBackend == "ddraw" || effectiveWindowedBackend == "dxwnd";
-
-                bool canUseDxwndProxy = hasDdraw && hasDxwnd && hasDxwndProfile;
-                bool canUseDdrawOnly = hasDdraw && !hasDxwnd;
-                bool useWrapperProxy = !forceInject && (forceProxy ? hasDdraw : (canUseDxwndProxy || canUseDdrawOnly || hasDdraw));
-
-                WriteDebugLog(appBasePath, "Windowed decision: hasDdraw=" + hasDdraw + " hasDxwnd=" + hasDxwnd + " hasDxwndProfile=" + hasDxwndProfile + " forceInject=" + forceInject + " useWrapperProxy=" + useWrapperProxy);
-
-                if (useWrapperProxy)
+                WriteDebugLog(appBasePath, "Windowed decision: hasDdraw=" + hasDdraw + " hasDxwnd=" + hasDxwnd + " hasDxwndProfile=" + hasDxwndProfile + " backend=dxwnd-proxy");
+                if (!(hasDdraw && hasDxwnd && hasDxwndProfile))
                 {
-                    Console.WriteLine("Windowed mode: using ddraw wrapper");
-                    if (canUseDxwndProxy)
-                        WriteDebugLog(appBasePath, "Windowed mode using dxwnd proxy via ddraw.dll");
-                    else
-                        WriteDebugLog(appBasePath, "Windowed mode using ddraw wrapper without dxwnd profile");
+                    MessageBox.Show(
+                        "Windowed mode requires DxWnd proxy files in the game folder:\n\n" +
+                        "- ddraw.dll\n" +
+                        "- dxwnd.dll\n" +
+                        "- dxwnd.dxw\n\n" +
+                        "Please restore the windowed compatibility profile and try again.",
+                        "Windowed mode",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Information);
+                    return;
                 }
-                else
-                {
-                    string injectDllConfig = IniGet(config, "LauncherConfig", "InjectDll", "").Trim();
-                    // Fallback path: inject dxwnd.dll from game folder or configured dll.
-                    if (hasDxwnd)
-                    {
-                        dllToInject = appBasePath + "dxwnd.dll";
-                        createSuspended = true;
-                        Console.WriteLine("Windowed mode: injecting dxwnd.dll");
-                        WriteDebugLog(appBasePath, "Windowed mode injecting dxwnd.dll");
-                    }
-                    else if (injectDllConfig.Length > 0)
-                    {
-                        dllToInject = Path.IsPathRooted(injectDllConfig) ? injectDllConfig : appBasePath + injectDllConfig;
-                        if (File.Exists(dllToInject))
-                            createSuspended = true;
-                        else
-                            dllToInject = "";
-                        WriteDebugLog(appBasePath, "Windowed InjectDll candidate=" + dllToInject + " createSuspended=" + createSuspended);
-                    }
-
-                    if (dllToInject.Length == 0 && !File.Exists(appBasePath + "ddraw.dll"))
-                    {
-                        string dxWndPath = IniGet(config, "Screen", "DxWndPath", "").Trim();
-                        if (dxWndPath.Length > 0 && !Path.IsPathRooted(dxWndPath))
-                            dxWndPath = appBasePath + dxWndPath;
-                        if (File.Exists(dxWndPath))
-                        {
-                            try
-                            {
-                                var psi = new ProcessStartInfo
-                                {
-                                    FileName = dxWndPath,
-                                    Arguments = "\"" + binaryPath + "\" " + credentialsEncrypted,
-                                    WorkingDirectory = appBasePath,
-                                    UseShellExecute = false
-                                };
-                                Process.Start(psi);
-                                WriteDebugLog(appBasePath, "Windowed mode launched via DxWndPath: " + dxWndPath);
-                                Environment.Exit(0);
-                                return;
-                            }
-                            catch (Exception ex) { Console.WriteLine("DxWnd launch failed: " + ex.Message); }
-                        }
-                        MessageBox.Show(
-                            "Windowed mode is set but no windowed support was found.\n\n" +
-                            "Either:\n" +
-                            "1) Create compat\\windowed or compat\\3 and place windowed files there,\n" +
-                            "2) Put ddraw.dll in the game folder,\n" +
-                            "3) Put dxwnd.dll in the game folder,\n" +
-                            "4) Set [LauncherConfig] InjectDll,\n" +
-                            "5) Or set [Screen] DxWndPath.",
-                            "Windowed mode",
-                            MessageBoxButtons.OK,
-                            MessageBoxIcon.Information);
-                    }
-                }
+                Console.WriteLine("Windowed mode: using dxwnd proxy wrapper");
+                WriteDebugLog(appBasePath, "Windowed mode using dxwnd proxy wrapper");
             }
-            // WindowedMode=0: never inject; launch game normally. WindowedMode=1: use dxwnd/InjectDll/ddraw as above.
+            // WindowedMode=0: never inject; launch game normally. WindowedMode=1: fixed DxWnd proxy launch.
 
             EnsureCapsLockOff(config);
             LaunchGunbound(binaryPath, credentialsEncrypted, createSuspended, dllToInject);

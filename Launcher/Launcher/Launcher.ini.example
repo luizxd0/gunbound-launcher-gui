@@ -27,7 +27,9 @@ DisplayProfile=fullscreen_voodoo2
 # compat\3 or compat\windowed           -> windowed
 # compat\1 or compat\fullscreen_voodoo2 -> fullscreen voodoo2
 # Advanced internal options exist but are intentionally hidden from players.
-# Windowed mode auto-normalizes dxwnd.dxw path0/startfolder0/launchpath0 at launch.
+# Windowed mode uses a fixed DxWnd proxy launch path for stability.
+# Optional hidden tuning: set to 0 only if a specific client requires hook-all-dlls.
+# DxwndDisableHookDlls=1
 
 [GameConfig]
 Effect3D=3
