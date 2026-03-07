@@ -12,6 +12,7 @@ using System.Net;
 using System.Runtime.InteropServices;
 using System.Threading;
 using System.Drawing;
+using System.Globalization;
 
 namespace Launcher
 {
@@ -41,6 +42,9 @@ namespace Launcher
 
         [DllImport("user32.dll", SetLastError = true)]
         static extern IntPtr SendMessage(IntPtr hWnd, int Msg, IntPtr wParam, IntPtr lParam);
+
+        [DllImport("user32.dll", CharSet = CharSet.Auto, SetLastError = true)]
+        static extern bool SetWindowText(IntPtr hWnd, string lpString);
 
         [DllImport("user32.dll", SetLastError = true)]
         static extern IntPtr CopyIcon(IntPtr hIcon);
@@ -803,7 +807,33 @@ namespace Launcher
             }
         }
 
-        static void LaunchGunbound(string binaryPath, string credentialsEncrypted, bool createSuspended, string dllToInject = "")
+        static IntPtr TryLoadIconFromPath(string iconPath)
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(iconPath) || !File.Exists(iconPath))
+                    return IntPtr.Zero;
+                string ext = Path.GetExtension(iconPath);
+                if (ext != null && ext.Equals(".ico", StringComparison.OrdinalIgnoreCase))
+                {
+                    using (Icon ico = new Icon(iconPath))
+                        return CopyIcon(ico.Handle);
+                }
+
+                using (Icon ico = Icon.ExtractAssociatedIcon(iconPath))
+                {
+                    if (ico == null)
+                        return IntPtr.Zero;
+                    return CopyIcon(ico.Handle);
+                }
+            }
+            catch
+            {
+                return IntPtr.Zero;
+            }
+        }
+
+        static void LaunchGunbound(string binaryPath, string credentialsEncrypted, bool createSuspended, string dllToInject, string forcedWindowTitle, string forcedIconPath)
         {
             int pid = NativeAPI.CreateProcessWrapper(binaryPath, credentialsEncrypted, createSuspended);
             if (dllToInject.Length != 0)
@@ -816,37 +846,127 @@ namespace Launcher
 
             try
             {
-                string iconPath = Path.Combine(Application.StartupPath, "launcher_icon_32.ico");
-                if (File.Exists(iconPath))
-                {
-                    if (_cachedGameIconHandle == IntPtr.Zero)
-                    {
-                        using (Icon ico = new Icon(iconPath))
-                        {
-                            _cachedGameIconHandle = CopyIcon(ico.Handle);
-                        }
-                    }
+                IntPtr iconHandle = IntPtr.Zero;
+                if (!string.IsNullOrEmpty(forcedIconPath))
+                    iconHandle = TryLoadIconFromPath(forcedIconPath);
 
-                    if (_cachedGameIconHandle != IntPtr.Zero)
+                string appBasePath = Path.GetDirectoryName(binaryPath);
+                if (iconHandle == IntPtr.Zero && !string.IsNullOrEmpty(appBasePath))
+                {
+                    iconHandle = TryLoadDxwndIconHandle(appBasePath);
+                    if (iconHandle == IntPtr.Zero && _cachedGameIconHandle == IntPtr.Zero)
                     {
-                        for (int i = 0; i < 80; i++)
-                        {
-                            Process p = Process.GetProcessById(pid);
-                            p.Refresh();
-                            if (p.MainWindowHandle != IntPtr.Zero)
-                            {
-                                SendMessage(p.MainWindowHandle, WM_SETICON, (IntPtr)ICON_BIG, _cachedGameIconHandle);
-                                SendMessage(p.MainWindowHandle, WM_SETICON, (IntPtr)ICON_SMALL, _cachedGameIconHandle);
-                                break;
-                            }
-                            Thread.Sleep(100);
-                        }
+                        string iconPath = Path.Combine(Application.StartupPath, "launcher_icon_32.ico");
+                        _cachedGameIconHandle = TryLoadIconFromPath(iconPath);
                     }
+                    if (iconHandle == IntPtr.Zero)
+                        iconHandle = _cachedGameIconHandle;
                 }
+
+                TryApplyWindowPresentation(pid, iconHandle, forcedWindowTitle);
             }
             catch (Exception ex)
             {
                 Console.WriteLine("Icon: could not set game icon: " + ex.Message);
+            }
+        }
+
+        static void TryApplyWindowPresentation(int pid, IntPtr iconHandle, string forcedWindowTitle)
+        {
+            bool needTitle = !string.IsNullOrEmpty(forcedWindowTitle);
+            bool needIcon = iconHandle != IntPtr.Zero;
+            if (!needTitle && !needIcon)
+                return;
+
+            IntPtr titleAppliedHandle = IntPtr.Zero;
+            int iconPushes = 0;
+            for (int i = 0; i < 40; i++)
+            {
+                Process p = Process.GetProcessById(pid);
+                p.Refresh();
+                if (p.MainWindowHandle != IntPtr.Zero)
+                {
+                    if (needIcon)
+                    {
+                        SendMessage(p.MainWindowHandle, WM_SETICON, (IntPtr)ICON_BIG, iconHandle);
+                        SendMessage(p.MainWindowHandle, WM_SETICON, (IntPtr)ICON_SMALL, iconHandle);
+                        iconPushes++;
+                        // Keep pushing icon for a few cycles in case DxWnd/game resets it during startup.
+                        if (iconPushes >= 10)
+                            needIcon = false;
+                    }
+
+                    if (needTitle && p.MainWindowHandle != titleAppliedHandle)
+                    {
+                        SetWindowText(p.MainWindowHandle, forcedWindowTitle);
+                        titleAppliedHandle = p.MainWindowHandle;
+                        needTitle = false;
+                    }
+
+                    if (!needTitle && !needIcon)
+                        return;
+                }
+                Thread.Sleep(100);
+            }
+        }
+
+        static IntPtr TryLoadDxwndIconHandle(string appBasePath)
+        {
+            try
+            {
+                string dxwndPath = Path.Combine(appBasePath, "dxwnd.dxw");
+                if (!File.Exists(dxwndPath))
+                    return IntPtr.Zero;
+
+                string[] lines = File.ReadAllLines(dxwndPath);
+                string iconHex = null;
+                for (int i = 0; i < lines.Length; i++)
+                {
+                    string line = lines[i] ?? "";
+                    int eq = line.IndexOf('=');
+                    if (eq < 0)
+                        continue;
+                    string key = line.Substring(0, eq).Trim();
+                    if (key.Equals("icon0", StringComparison.OrdinalIgnoreCase))
+                    {
+                        iconHex = line.Substring(eq + 1).Trim();
+                        break;
+                    }
+                }
+
+                if (string.IsNullOrEmpty(iconHex))
+                    return IntPtr.Zero;
+
+                var hexOnly = new StringBuilder(iconHex.Length);
+                for (int i = 0; i < iconHex.Length; i++)
+                {
+                    char c = iconHex[i];
+                    if (Uri.IsHexDigit(c))
+                        hexOnly.Append(c);
+                }
+
+                if (hexOnly.Length < 4)
+                    return IntPtr.Zero;
+                if ((hexOnly.Length % 2) != 0)
+                    hexOnly.Length -= 1;
+
+                int byteCount = hexOnly.Length / 2;
+                byte[] bytes = new byte[byteCount];
+                for (int i = 0; i < byteCount; i++)
+                {
+                    bytes[i] = byte.Parse(hexOnly.ToString(i * 2, 2), NumberStyles.HexNumber, CultureInfo.InvariantCulture);
+                }
+
+                using (var ms = new MemoryStream(bytes))
+                using (Icon ico = new Icon(ms))
+                {
+                    return CopyIcon(ico.Handle);
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("Icon: could not load dxwnd icon0: " + ex.Message);
+                return IntPtr.Zero;
             }
         }
 
@@ -1118,7 +1238,15 @@ namespace Launcher
             // WindowedMode=0: never inject; launch game normally. WindowedMode=1: fixed DxWnd proxy launch.
 
             EnsureCapsLockOff(config);
-            LaunchGunbound(binaryPath, credentialsEncrypted, createSuspended, dllToInject);
+            string forcedWindowTitle = (IniGet(config, "Screen", "WindowTitle", "") ?? "").Trim();
+
+            string forcedIconPath = (IniGet(config, "Screen", "GameIconPath", "GunBound.gme") ?? "").Trim();
+            if (forcedIconPath.Length > 0 && !Path.IsPathRooted(forcedIconPath))
+                forcedIconPath = Path.Combine(appBasePath, forcedIconPath);
+            if (forcedIconPath.Length > 0 && !File.Exists(forcedIconPath))
+                forcedIconPath = "";
+
+            LaunchGunbound(binaryPath, credentialsEncrypted, createSuspended, dllToInject, forcedWindowTitle, forcedIconPath);
 
             Environment.Exit(0);
         }
