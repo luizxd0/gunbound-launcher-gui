@@ -12,6 +12,13 @@ namespace Launcher
     {
         const string OptionsBannerUrl = "http://classic-gunbound.servegame.com/images/logo_options.png";
 
+        enum EffectPreset
+        {
+            FullEffect,
+            LowEffect,
+            NoBackground
+        }
+
         class ResolutionOption
         {
             public int Value;
@@ -39,6 +46,9 @@ namespace Launcher
         CheckBox chkRender1;
         CheckBox chkRender2;
         CheckBox chkRender3;
+        PictureBox pbRender1;
+        PictureBox pbRender2;
+        PictureBox pbRender3;
         CheckBox chkFullscreenCompat;
         CheckBox chkWindowedMode;
         ComboBox cmbDisplayMode;
@@ -54,7 +64,7 @@ namespace Launcher
 
         public OptionsForm()
         {
-            Text = "GunBound Legacy Options";
+            Text = "GunBound Classic Options";
             FormBorderStyle = FormBorderStyle.FixedDialog;
             StartPosition = FormStartPosition.CenterParent;
             MaximizeBox = false;
@@ -70,7 +80,7 @@ namespace Launcher
         void InitializeUi()
         {
             Label lblTitle = new Label();
-            lblTitle.Text = "GunBound Legacy Options";
+            lblTitle.Text = "GunBound Classic Options";
             lblTitle.Font = new Font(Font.FontFamily, 10f, FontStyle.Bold);
             lblTitle.AutoSize = true;
             lblTitle.Location = new Point(10, 10);
@@ -90,30 +100,36 @@ namespace Launcher
             gbRendering.Size = new Size(350, 120);
             Controls.Add(gbRendering);
 
-            PictureBox pb1 = CreateRenderPreview(new Color[] { Color.FromArgb(45, 60, 90), Color.FromArgb(120, 160, 220) }, "Classic");
-            pb1.Location = new Point(10, 22);
-            gbRendering.Controls.Add(pb1);
+            pbRender1 = CreateEffectPreview("FullEffect", "FullEffect.png", "Full Effect");
+            pbRender1.Location = new Point(10, 22);
+            pbRender1.Click += RenderPreview_Click;
+            gbRendering.Controls.Add(pbRender1);
 
-            PictureBox pb2 = CreateRenderPreview(new Color[] { Color.FromArgb(80, 50, 40), Color.FromArgb(190, 140, 90) }, "Balanced");
-            pb2.Location = new Point(123, 22);
-            gbRendering.Controls.Add(pb2);
+            pbRender2 = CreateEffectPreview("LowEffect", "LowEffect.png", "Low Effect");
+            pbRender2.Location = new Point(123, 22);
+            pbRender2.Click += RenderPreview_Click;
+            gbRendering.Controls.Add(pbRender2);
 
-            PictureBox pb3 = CreateRenderPreview(new Color[] { Color.FromArgb(40, 70, 45), Color.FromArgb(120, 210, 135) }, "Sharp");
-            pb3.Location = new Point(236, 22);
-            gbRendering.Controls.Add(pb3);
+            pbRender3 = CreateEffectPreview("NoBg", "NoBg.png", "No Background");
+            pbRender3.Location = new Point(236, 22);
+            pbRender3.Click += RenderPreview_Click;
+            gbRendering.Controls.Add(pbRender3);
 
             chkRender1 = new CheckBox();
             chkRender1.Location = new Point(51, 83);
+            chkRender1.Tag = EffectPreset.FullEffect;
             chkRender1.CheckedChanged += RenderCheck_CheckedChanged;
             gbRendering.Controls.Add(chkRender1);
 
             chkRender2 = new CheckBox();
             chkRender2.Location = new Point(164, 83);
+            chkRender2.Tag = EffectPreset.LowEffect;
             chkRender2.CheckedChanged += RenderCheck_CheckedChanged;
             gbRendering.Controls.Add(chkRender2);
 
             chkRender3 = new CheckBox();
             chkRender3.Location = new Point(277, 83);
+            chkRender3.Tag = EffectPreset.NoBackground;
             chkRender3.CheckedChanged += RenderCheck_CheckedChanged;
             gbRendering.Controls.Add(chkRender3);
 
@@ -235,41 +251,117 @@ namespace Launcher
             Controls.Add(btnSave);
         }
 
-        PictureBox CreateRenderPreview(Color[] colors, string label)
+        PictureBox CreateEffectPreview(string resourceKey, string fileName, string fallbackLabel)
         {
-            Bitmap bmp = new Bitmap(103, 55);
-            using (Graphics g = Graphics.FromImage(bmp))
-            {
-                using (SolidBrush b1 = new SolidBrush(colors[0]))
-                using (SolidBrush b2 = new SolidBrush(colors[1]))
-                using (SolidBrush b3 = new SolidBrush(Color.FromArgb(35, 35, 35)))
-                using (SolidBrush b4 = new SolidBrush(Color.FromArgb(220, 220, 220)))
-                {
-                    g.FillRectangle(b1, 0, 0, 103, 55);
-                    g.FillEllipse(b2, -20, -10, 60, 40);
-                    g.FillEllipse(b2, 45, 8, 60, 40);
-                    g.FillRectangle(b3, 0, 42, 103, 13);
-                    g.FillRectangle(b4, 6, 30, 26, 12);
-                    g.FillRectangle(b4, 38, 26, 28, 14);
-                    g.FillRectangle(b4, 72, 32, 22, 10);
-                }
-                using (Pen p = new Pen(Color.Black))
-                {
-                    g.DrawRectangle(p, 0, 0, 102, 54);
-                }
-                using (Font f = new Font(FontFamily.GenericSansSerif, 8f, FontStyle.Bold))
-                using (SolidBrush textBrush = new SolidBrush(Color.White))
-                {
-                    g.DrawString(label, f, textBrush, 5, 3);
-                }
-            }
-
+            Bitmap bmp = TryLoadEffectPreviewImage(resourceKey, fileName) ?? CreateRenderPreviewFallback(fallbackLabel);
             PictureBox pb = new PictureBox();
             pb.Size = new Size(103, 55);
             pb.SizeMode = PictureBoxSizeMode.StretchImage;
             pb.BorderStyle = BorderStyle.FixedSingle;
+            pb.Cursor = Cursors.Hand;
             pb.Image = bmp;
             return pb;
+        }
+
+        Bitmap TryLoadEffectPreviewImage(string resourceKey, string fileName)
+        {
+            // Prefer assembly-embedded preview images so options work even when Resources\ is not deployed next to the exe.
+            Bitmap embeddedImage = TryLoadEmbeddedEffectPreviewImage(fileName);
+            if (embeddedImage != null)
+                return embeddedImage;
+
+            try
+            {
+                object embedded = Properties.Resources.ResourceManager.GetObject(resourceKey, Properties.Resources.Culture);
+                if (embedded is Bitmap)
+                    return new Bitmap((Bitmap)embedded);
+                if (embedded is Image)
+                    return new Bitmap((Image)embedded);
+            }
+            catch
+            {
+            }
+
+            string[] candidates = new string[]
+            {
+                Path.Combine(Application.StartupPath, "Resources", fileName),
+                Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Resources", fileName),
+                Path.Combine(AppDomain.CurrentDomain.BaseDirectory, fileName)
+            };
+
+            for (int i = 0; i < candidates.Length; i++)
+            {
+                try
+                {
+                    if (!File.Exists(candidates[i]))
+                        continue;
+                    using (Image img = Image.FromFile(candidates[i]))
+                        return new Bitmap(img);
+                }
+                catch
+                {
+                }
+            }
+
+            return null;
+        }
+
+        Bitmap TryLoadEmbeddedEffectPreviewImage(string fileName)
+        {
+            if (string.IsNullOrEmpty(fileName))
+                return null;
+
+            string[] manifestCandidates = new string[]
+            {
+                "Launcher.Resources." + fileName,
+                "Resources." + fileName
+            };
+
+            var asm = typeof(OptionsForm).Assembly;
+            for (int i = 0; i < manifestCandidates.Length; i++)
+            {
+                try
+                {
+                    using (Stream stream = asm.GetManifestResourceStream(manifestCandidates[i]))
+                    {
+                        if (stream == null)
+                            continue;
+                        using (Image image = Image.FromStream(stream))
+                            return new Bitmap(image);
+                    }
+                }
+                catch
+                {
+                }
+            }
+
+            return null;
+        }
+
+        Bitmap CreateRenderPreviewFallback(string label)
+        {
+            Bitmap bmp = new Bitmap(103, 55);
+            using (Graphics g = Graphics.FromImage(bmp))
+            {
+                g.Clear(Color.FromArgb(52, 43, 35));
+                using (SolidBrush b1 = new SolidBrush(Color.FromArgb(84, 66, 52)))
+                    g.FillRectangle(b1, 0, 32, 103, 23);
+                using (SolidBrush b2 = new SolidBrush(Color.FromArgb(220, 210, 190)))
+                    g.FillRectangle(b2, 12, 22, 24, 12);
+                using (Pen p = new Pen(Color.Black))
+                    g.DrawRectangle(p, 0, 0, 102, 54);
+                using (Font f = new Font(FontFamily.GenericSansSerif, 7f, FontStyle.Bold))
+                using (SolidBrush textBrush = new SolidBrush(Color.White))
+                    g.DrawString(label ?? "", f, textBrush, 4, 4);
+            }
+            return bmp;
+        }
+
+        void RenderPreview_Click(object sender, EventArgs e)
+        {
+            if (sender == pbRender1) chkRender1.Checked = true;
+            else if (sender == pbRender2) chkRender2.Checked = true;
+            else if (sender == pbRender3) chkRender3.Checked = true;
         }
 
         void OptionsForm_Load(object sender, EventArgs e)
@@ -322,7 +414,8 @@ namespace Launcher
         void ApplyIniToUi()
         {
             int effect3D = IniGetInt(_ini, "GameConfig", "Effect3D", 3);
-            SetRenderMode(effect3D);
+            int backGround = IniGetInt(_ini, "GameConfig", "BackGround", 1);
+            SetEffectPreset(ResolveEffectPreset(effect3D, backGround));
 
             string displayProfileRaw = IniGet(_ini, "Screen", "DisplayProfile", "");
             string displayProfile = NormalizeDisplayProfile(displayProfileRaw);
@@ -343,7 +436,7 @@ namespace Launcher
 
         void ApplyDefaultsToUi()
         {
-            SetRenderMode(3);
+            SetEffectPreset(EffectPreset.FullEffect);
             chkFullscreenCompat.Checked = false;
             chkWindowedMode.Checked = false;
             SelectDisplayMode("fullscreen_voodoo2");
@@ -359,7 +452,11 @@ namespace Launcher
             if (_ini == null)
                 _ini = new Dictionary<string, Dictionary<string, string>>(StringComparer.OrdinalIgnoreCase);
 
-            IniSet(_ini, "GameConfig", "Effect3D", GetRenderMode().ToString());
+            int effect3D;
+            int backGround;
+            GetEffectConfigValues(GetSelectedEffectPreset(), out effect3D, out backGround);
+            IniSet(_ini, "GameConfig", "Effect3D", effect3D.ToString());
+            IniSet(_ini, "GameConfig", "BackGround", backGround.ToString());
             IniSet(_ini, "GameConfig", "VolEffect", tbEffectVolume.Value.ToString());
             IniSet(_ini, "GameConfig", "VolMusic", tbMusicVolume.Value.ToString());
             int selectedResolution = GetSelectedResolutionValue();
@@ -463,20 +560,56 @@ namespace Launcher
             _updatingDisplayControls = false;
         }
 
-        void SetRenderMode(int mode)
+        EffectPreset ResolveEffectPreset(int effect3D, int backGround)
+        {
+            // GunBound stores background visibility separately from effect quality.
+            if (backGround == 0)
+                return EffectPreset.NoBackground;
+            if (effect3D >= 3)
+                return EffectPreset.FullEffect;
+            return EffectPreset.LowEffect;
+        }
+
+        void SetEffectPreset(EffectPreset preset)
         {
             _updatingRenderChecks = true;
-            chkRender1.Checked = mode <= 1;
-            chkRender2.Checked = mode == 2;
-            chkRender3.Checked = mode >= 3;
+            chkRender1.Checked = preset == EffectPreset.FullEffect;
+            chkRender2.Checked = preset == EffectPreset.LowEffect;
+            chkRender3.Checked = preset == EffectPreset.NoBackground;
             _updatingRenderChecks = false;
         }
 
-        int GetRenderMode()
+        EffectPreset GetSelectedEffectPreset()
         {
-            if (chkRender3.Checked) return 3;
-            if (chkRender2.Checked) return 2;
-            return 1;
+            if (chkRender1.Checked) return EffectPreset.FullEffect;
+            if (chkRender2.Checked) return EffectPreset.LowEffect;
+            return EffectPreset.NoBackground;
+        }
+
+        void GetEffectConfigValues(EffectPreset preset, out int effect3D, out int backGround)
+        {
+            effect3D = 2;
+            backGround = 1;
+
+            // Preset mapping used by this launcher UI:
+            // FullEffect -> high effect + background on
+            // LowEffect  -> low effect  + background on
+            // NoBg       -> low effect  + background off
+            if (preset == EffectPreset.FullEffect)
+            {
+                effect3D = 3;
+                backGround = 1;
+            }
+            else if (preset == EffectPreset.LowEffect)
+            {
+                effect3D = 2;
+                backGround = 1;
+            }
+            else
+            {
+                effect3D = 2;
+                backGround = 0;
+            }
         }
 
         void SelectResolution(int value)

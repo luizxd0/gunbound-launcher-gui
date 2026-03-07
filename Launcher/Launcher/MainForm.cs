@@ -8,12 +8,16 @@ using System.Text;
 using System.Windows.Forms;
 using System.Runtime.InteropServices;
 using System.IO;
+using System.Threading;
 
 namespace Launcher
 {
     public partial class MainForm : Form
     {
         LauncherState launcherState = LauncherState.CHECKING_VERSION;
+        readonly object updateFlowLock = new object();
+        bool updateFlowRunning = false;
+        volatile bool cancelUpdateRequested = false;
 
         public MainForm()
         {
@@ -323,11 +327,131 @@ namespace Launcher
         {
             string appBase = Application.StartupPath + "\\";
             SetNoticeURL(GunBoundLauncher.GetNoticeUrl(appBase));
-            ChangeLauncherState(LauncherState.AWAITING_LOGIN);
 
             string lastId = ReadIniValue(GetLauncherIniPath(), "LauncherConfig", "LastID", "");
             if (!string.IsNullOrWhiteSpace(lastId))
                 txtUsername.Text = lastId.Trim();
+
+            BeginUpdateFlow();
+        }
+
+        private void BeginUpdateFlow()
+        {
+            lock (updateFlowLock)
+            {
+                if (updateFlowRunning)
+                    return;
+                updateFlowRunning = true;
+                cancelUpdateRequested = false;
+            }
+
+            ChangeLauncherState(LauncherState.CHECKING_VERSION);
+            btnCancelUpdate.Enabled = true;
+            SetExtendedProgressPercentage(0);
+            SetOverallProgressPercentage(0);
+            SetExtendedProgressText("Preparing update...");
+            SetOverallProgressText("Checking version...");
+
+            string appBase = Application.StartupPath + "\\";
+            ThreadPool.QueueUserWorkItem(delegate
+            {
+                LauncherUpdater.UpdateResult result;
+                try
+                {
+                    result = LauncherUpdater.Run(
+                        appBase,
+                        delegate { return cancelUpdateRequested; },
+                        ReportUpdateProgress);
+                }
+                catch (Exception ex)
+                {
+                    result = LauncherUpdater.UpdateResult.Create(
+                        LauncherUpdater.UpdateResultKind.FullDownloadRequired,
+                        "Unexpected updater error: " + ex.Message);
+                }
+
+                HandleUpdateResult(result);
+            });
+        }
+
+        private void ReportUpdateProgress(LauncherUpdater.UpdateProgress progress)
+        {
+            if (progress == null)
+                return;
+
+            RunOnUiThread(delegate
+            {
+                if (IsDisposed)
+                    return;
+
+                ChangeLauncherState(progress.State);
+                SetExtendedProgressPercentage(progress.FilePercent);
+                SetOverallProgressPercentage(progress.OverallPercent);
+                SetExtendedProgressText(progress.FileText ?? "");
+                SetOverallProgressText(progress.OverallText ?? "");
+            });
+        }
+
+        private void HandleUpdateResult(LauncherUpdater.UpdateResult result)
+        {
+            lock (updateFlowLock)
+            {
+                updateFlowRunning = false;
+            }
+
+            RunOnUiThread(delegate
+            {
+                if (IsDisposed)
+                    return;
+
+                btnCancelUpdate.Enabled = true;
+                if (result == null)
+                {
+                    result = LauncherUpdater.UpdateResult.Create(
+                        LauncherUpdater.UpdateResultKind.FullDownloadRequired,
+                        "Unknown updater failure.");
+                }
+
+                if (result.Kind == LauncherUpdater.UpdateResultKind.Cancelled)
+                {
+                    Application.Exit();
+                    return;
+                }
+
+                if (result.Kind == LauncherUpdater.UpdateResultKind.FullDownloadRequired)
+                {
+                    ChangeLauncherState(LauncherState.FULL_DOWNLOAD_REQUIRED);
+                    if (!string.IsNullOrWhiteSpace(result.Message))
+                    {
+                        MessageBox.Show(result.Message, "Update", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    }
+                    return;
+                }
+
+                ChangeLauncherState(LauncherState.AWAITING_LOGIN);
+            });
+        }
+
+        private void RunOnUiThread(Action action)
+        {
+            if (action == null)
+                return;
+
+            if (!IsHandleCreated || IsDisposed)
+                return;
+
+            if (InvokeRequired)
+                BeginInvoke(action);
+            else
+                action();
+        }
+
+        private bool IsUpdateFlowRunning()
+        {
+            lock (updateFlowLock)
+            {
+                return updateFlowRunning;
+            }
         }
 
         private static string GetLauncherIniPath()
@@ -465,9 +589,16 @@ namespace Launcher
         // Cancel update button, shown during version check AND update
         private void BtnCancelUpdate_Click(object sender, EventArgs e)
         {
-            if (launcherState == LauncherState.UPDATING)
+            if (launcherState == LauncherState.CHECKING_VERSION || launcherState == LauncherState.UPDATING)
             {
-                // Optionally terminate the currently processed update gracefully
+                if (IsUpdateFlowRunning())
+                {
+                    cancelUpdateRequested = true;
+                    btnCancelUpdate.Enabled = false;
+                    SetExtendedProgressText("Cancelling update...");
+                    SetOverallProgressText("Please wait...");
+                    return;
+                }
             }
             Application.Exit();
         }

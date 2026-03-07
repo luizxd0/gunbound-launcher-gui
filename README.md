@@ -24,11 +24,18 @@ Create `Launcher.ini` from `Launcher.ini.example`. Main sections:
   - **In-game notice:** If you set `Notice` (or `[LauncherConfig] NoticeURL=`), that URL is also written to the game registry so the client can show the same notice in-game.
 
 - **Patching**  
-  The launcher UI has version-check and update panels, but the **patch/update logic is not implemented yet**. When you add it, use these in `Launcher.ini`:  
-  - `[URLs] Manifest=` – URL of your patch manifest (e.g. file list).  
-  - `[URLs] BaseFiles=` – Base URL for downloading game files.  
-  - `[URLs] LauncherVersion=` – URL of a text file with latest launcher version.  
-  Until then, the launcher goes straight to the login screen.
+  The launcher now performs startup patch checks and file updates before login. Configure:
+  - `[URLs] Manifest=` - URL to the manifest file.
+  - `[URLs] BaseFiles=` - Base URL where patch files are hosted.
+  - `[URLs] LauncherVersion=` - Optional URL with launcher version text (`1.2.3.4`); if newer than local, launcher shows the Full Download panel.
+  - If `Manifest` or `BaseFiles` are missing, launcher skips patching and goes to login.
+  - If patching fails (manifest download/parse, hash mismatch, file replace error), launcher shows the Full Download panel.
+  - Supported manifest line formats (comments/blank lines allowed):
+  - `relative/path.ext|<hash>`
+  - `relative/path.ext|<hash>|<size>`
+  - `<hash>|relative/path.ext|<size>`
+  - separators: `|`, `,`, `;`, or tab
+  - hash lengths: 32 (MD5), 40 (SHA1), 64 (SHA256)
 
 - **Login verification:** Set `[URLs] LoginCheckUrl=` or `[LauncherConfig] LoginCheckUrl=` to an HTTP(S) URL. When the user clicks "Game Start", the launcher POSTs `username` and `password` (form-encoded) to that URL. Your server should return **200** for valid credentials and **401** (or any non-2xx) for invalid. If the URL is omitted, the launcher does not verify and starts the game immediately.
 - **Input:** Optional `[LauncherConfig] ForceCapsLockOff=1` (default behavior) turns Caps Lock off before launching the client, to reduce false caps-lock warnings in legacy UI.
@@ -50,7 +57,7 @@ Create `Launcher.ini` from `Launcher.ini.example`. Main sections:
 
 - Original Softnyx interface! Even includes the raon MessageBox (documentation pending).
 - Thinned version of [gunbound-launcher](https://github.com/jglim/gunbound-launcher). Most of the technical details are in that repo.
-- Most of the UI plumbing is already done. Just add logic! (and your own update mechanism)
+- Includes startup patch check/update flow and server-configurable update manifest support.
 
 ![Kitchen Sink Screenshot](https://raw.github.com/jglim/gunbound-launcher-gui/master/Other/kitchen_sink.gif)
 

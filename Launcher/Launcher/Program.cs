@@ -22,7 +22,6 @@ namespace Launcher
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
             mainForm = new MainForm();
-            mainForm.ChangeLauncherState(MainForm.LauncherState.AWAITING_LOGIN);
             Application.Run(mainForm);
             return;
         }
