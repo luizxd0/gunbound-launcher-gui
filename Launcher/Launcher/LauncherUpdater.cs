@@ -11,6 +11,9 @@ namespace Launcher
 {
     internal static class LauncherUpdater
     {
+        const string DefaultManifestUrl = "http://classic-gunbound.servegame.com/update/manifest.txt";
+        const string DefaultBaseFilesUrl = "http://classic-gunbound.servegame.com/update/gamefiles/";
+
         internal enum UpdateResultKind
         {
             NoUpdateConfiguration,
@@ -50,6 +53,7 @@ namespace Launcher
             public string LocalPath;
             public string HashHex;
             public long SizeBytes;
+            public string DirectDownloadUrl;
         }
 
         public static UpdateResult Run(string appBasePath, Func<bool> isCancellationRequested, Action<UpdateProgress> reportProgress)
@@ -65,20 +69,24 @@ namespace Launcher
             string manifestUrl = IniGet(config, "URLs", "Manifest", "");
             if (string.IsNullOrEmpty(manifestUrl))
                 manifestUrl = IniGet(config, "LauncherConfig", "Manifest", "");
+            if (string.IsNullOrWhiteSpace(manifestUrl))
+                manifestUrl = DefaultManifestUrl;
 
             string baseFilesUrl = IniGet(config, "URLs", "BaseFiles", "");
             if (string.IsNullOrEmpty(baseFilesUrl))
                 baseFilesUrl = IniGet(config, "LauncherConfig", "BaseFiles", "");
+            if (string.IsNullOrWhiteSpace(baseFilesUrl))
+                baseFilesUrl = DefaultBaseFilesUrl;
 
             string launcherVersionUrl = IniGet(config, "URLs", "LauncherVersion", "");
             if (string.IsNullOrEmpty(launcherVersionUrl))
                 launcherVersionUrl = IniGet(config, "LauncherConfig", "LauncherVersion", "");
 
-            if (string.IsNullOrWhiteSpace(manifestUrl) || string.IsNullOrWhiteSpace(baseFilesUrl))
+            if (string.IsNullOrWhiteSpace(manifestUrl))
             {
                 return UpdateResult.Create(
                     UpdateResultKind.NoUpdateConfiguration,
-                    "Manifest/BaseFiles are not configured in Launcher.ini. Skipping patch update.");
+                    "Manifest is not configured.");
             }
 
             ReportProgress(
@@ -110,6 +118,7 @@ namespace Launcher
                 }
             }
 
+            List<ManifestEntry> manifestEntries;
             ReportProgress(
                 reportProgress,
                 MainForm.LauncherState.CHECKING_VERSION,
@@ -130,7 +139,6 @@ namespace Launcher
             if (isCancellationRequested())
                 return UpdateResult.Create(UpdateResultKind.Cancelled, "Update cancelled.");
 
-            List<ManifestEntry> manifestEntries;
             string manifestParseError;
             if (!TryParseManifest(manifestBody, normalizedBasePath, out manifestEntries, out manifestParseError))
             {
@@ -162,7 +170,7 @@ namespace Launcher
                     "Checking file: " + entry.RelativePath,
                     "Scanning local files (" + (i + 1).ToString(CultureInfo.InvariantCulture) + "/" + manifestEntries.Count.ToString(CultureInfo.InvariantCulture) + ")");
 
-                if (!FileMatchesHash(entry.LocalPath, entry.HashHex))
+                if (!LocalFileMatchesEntry(entry))
                     filesToUpdate.Add(entry);
             }
 
@@ -186,11 +194,11 @@ namespace Launcher
 
                 ManifestEntry entry = filesToUpdate[fileIndex];
                 string fileUrl;
-                if (!TryBuildFileUrl(baseFilesUrl, entry.RelativeUrlPath, out fileUrl))
+                if (!TryResolveEntryDownloadUrl(baseFilesUrl, entry, out fileUrl))
                 {
                     return UpdateResult.Create(
                         UpdateResultKind.FullDownloadRequired,
-                        "Invalid BaseFiles URL or file path in manifest: " + entry.RelativePath);
+                        "Missing or invalid download URL for " + entry.RelativePath + ".");
                 }
 
                 int completedFiles = fileIndex;
@@ -440,10 +448,11 @@ namespace Launcher
                 string relativePath;
                 string hashHex;
                 long sizeBytes;
+                string directDownloadUrl;
                 bool skipLine;
                 string lineError;
 
-                if (!TryParseManifestLine(line, out relativePath, out hashHex, out sizeBytes, out skipLine, out lineError))
+                if (!TryParseManifestLine(line, out relativePath, out hashHex, out sizeBytes, out directDownloadUrl, out skipLine, out lineError))
                 {
                     errorMessage = "Line " + (i + 1).ToString(CultureInfo.InvariantCulture) + ": " + lineError;
                     return false;
@@ -466,6 +475,7 @@ namespace Launcher
                 entry.LocalPath = localPath;
                 entry.HashHex = hashHex.ToUpperInvariant();
                 entry.SizeBytes = sizeBytes;
+                entry.DirectDownloadUrl = directDownloadUrl;
                 byPath[entry.RelativePath] = entry;
             }
 
@@ -475,11 +485,12 @@ namespace Launcher
             return true;
         }
 
-        static bool TryParseManifestLine(string line, out string relativePath, out string hashHex, out long sizeBytes, out bool skipLine, out string errorMessage)
+        static bool TryParseManifestLine(string line, out string relativePath, out string hashHex, out long sizeBytes, out string directDownloadUrl, out bool skipLine, out string errorMessage)
         {
             relativePath = "";
             hashHex = "";
             sizeBytes = -1;
+            directDownloadUrl = "";
             skipLine = false;
             errorMessage = "";
 
@@ -532,6 +543,14 @@ namespace Launcher
                 if (token.Length == 0)
                     continue;
 
+                string normalizedAbsoluteUrl;
+                if (TryNormalizeAbsoluteHttpUrl(token, out normalizedAbsoluteUrl))
+                {
+                    if (directDownloadUrl.Length == 0)
+                        directDownloadUrl = normalizedAbsoluteUrl;
+                    continue;
+                }
+
                 long parsedSize;
                 if (long.TryParse(token, NumberStyles.Integer, CultureInfo.InvariantCulture, out parsedSize) && parsedSize >= 0)
                 {
@@ -551,7 +570,16 @@ namespace Launcher
                 {
                     if (i == hashIndex)
                         continue;
-                    candidatePath = (tokens[i] ?? "").Trim().Trim('"');
+
+                    string token = (tokens[i] ?? "").Trim().Trim('"');
+                    if (token.Length == 0)
+                        continue;
+
+                    string ignoredAbsoluteUrl;
+                    if (TryNormalizeAbsoluteHttpUrl(token, out ignoredAbsoluteUrl))
+                        continue;
+
+                    candidatePath = token;
                     if (candidatePath.Length != 0)
                         break;
                 }
@@ -648,10 +676,20 @@ namespace Launcher
                 return false;
             }
 
-            string basePath = Path.GetFullPath(appBasePath);
-            if (!basePath.EndsWith(Path.DirectorySeparatorChar.ToString()))
-                basePath += Path.DirectorySeparatorChar;
-            string combined = Path.GetFullPath(Path.Combine(basePath, path));
+            string basePath;
+            string combined;
+            try
+            {
+                basePath = Path.GetFullPath(appBasePath);
+                if (!basePath.EndsWith(Path.DirectorySeparatorChar.ToString()))
+                    basePath += Path.DirectorySeparatorChar;
+                combined = Path.GetFullPath(Path.Combine(basePath, path));
+            }
+            catch (Exception ex)
+            {
+                errorMessage = "invalid file path: " + ex.Message;
+                return false;
+            }
 
             if (!combined.StartsWith(basePath, StringComparison.OrdinalIgnoreCase))
             {
@@ -691,6 +729,62 @@ namespace Launcher
             Uri fullUri = new Uri(baseUri, escapedRelative);
             fileUrl = fullUri.ToString();
             return true;
+        }
+
+        static bool TryResolveEntryDownloadUrl(string baseFilesUrl, ManifestEntry entry, out string fileUrl)
+        {
+            fileUrl = "";
+            if (entry == null)
+                return false;
+
+            string direct = entry.DirectDownloadUrl ?? "";
+            string normalizedDirect;
+            if (TryNormalizeAbsoluteHttpUrl(direct, out normalizedDirect))
+            {
+                fileUrl = normalizedDirect;
+                return true;
+            }
+
+            return TryBuildFileUrl(baseFilesUrl, entry.RelativeUrlPath, out fileUrl);
+        }
+
+        static bool TryNormalizeAbsoluteHttpUrl(string url, out string normalizedUrl)
+        {
+            normalizedUrl = "";
+            if (string.IsNullOrWhiteSpace(url))
+                return false;
+
+            Uri uri;
+            if (!Uri.TryCreate(url.Trim(), UriKind.Absolute, out uri))
+                return false;
+            if (!string.Equals(uri.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
+                return false;
+
+            normalizedUrl = uri.ToString();
+            return true;
+        }
+
+        static bool LocalFileMatchesEntry(ManifestEntry entry)
+        {
+            if (entry == null || !File.Exists(entry.LocalPath))
+                return false;
+
+            if (entry.SizeBytes >= 0)
+            {
+                try
+                {
+                    long localSize = new FileInfo(entry.LocalPath).Length;
+                    if (localSize != entry.SizeBytes)
+                        return false;
+                }
+                catch
+                {
+                    return false;
+                }
+            }
+
+            return FileMatchesHash(entry.LocalPath, entry.HashHex);
         }
 
         static bool FileMatchesHash(string filePath, string expectedHashHex)

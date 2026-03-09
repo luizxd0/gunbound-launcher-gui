@@ -26,13 +26,16 @@ Create `Launcher.ini` from `Launcher.ini.example`. Main sections:
 - **Patching**  
   The launcher now performs startup patch checks and file updates before login. Configure:
   - `[URLs] Manifest=` - URL to the manifest file.
-  - `[URLs] BaseFiles=` - Base URL where patch files are hosted.
+  - `[URLs] BaseFiles=` - Base URL where patch files are hosted (optional if each manifest line has a direct URL column).
   - `[URLs] LauncherVersion=` - Optional URL with launcher version text (`1.2.3.4`); if newer than local, launcher shows the Full Download panel.
-  - If `Manifest` or `BaseFiles` are missing, launcher skips patching and goes to login.
+  - If not configured in `Launcher.ini`, launcher defaults to:
+  - `http://classic-gunbound.servegame.com/update/manifest.txt`
+  - `http://classic-gunbound.servegame.com/update/gamefiles/`
   - If patching fails (manifest download/parse, hash mismatch, file replace error), launcher shows the Full Download panel.
   - Supported manifest line formats (comments/blank lines allowed):
   - `relative/path.ext|<hash>`
   - `relative/path.ext|<hash>|<size>`
+  - `relative/path.ext|<hash>|<size>|https://absolute/file/url.ext`
   - `<hash>|relative/path.ext|<size>`
   - separators: `|`, `,`, `;`, or tab
   - hash lengths: 32 (MD5), 40 (SHA1), 64 (SHA256)
@@ -52,6 +55,43 @@ Create `Launcher.ini` from `Launcher.ini.example`. Main sections:
   - A runtime trace is written to `launcher-debug.log` next to `Launcher.exe` for troubleshooting mode selection and backend decisions.
 
 - **Server / game:** `[LauncherConfig] ServerIP=`, `BuddyIP=`, and optional `[GameConfig]` as in the example.
+
+### Patch Build Workflow (Static Host)
+
+Use `Tools/build-patch.ps1` to generate a full manifest and copy only changed/new files into a publish folder:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\Tools\build-patch.ps1 `
+  -ClientRoot C:\GB\Client `
+  -PublishRoot C:\GB\PatchPublish `
+  -PruneDeleted
+```
+
+Or just double-click `Tools\build-patch.bat` (it wraps the same script with prompts).
+
+Results:
+- `manifest.txt` in `PatchPublish`
+- patch files in `PatchPublish\gamefiles\...`
+- script excludes `Launcher.exe` by default (launcher self-update should stay on the full-download path).
+
+Then upload the publish folder to your web host and set:
+- `[URLs] Manifest=https://your-host/manifest.txt`
+- `[URLs] BaseFiles=https://your-host/gamefiles/`
+
+For this project host:
+- `[URLs] Manifest=http://classic-gunbound.servegame.com/update/manifest.txt`
+- `[URLs] BaseFiles=http://classic-gunbound.servegame.com/update/gamefiles/`
+
+### Step-by-Step Release (Classic Host)
+
+1. Keep your latest playable client in a local folder (example `C:\GB\Client`).
+2. Double-click `Tools\build-classic-update.bat`.
+3. If needed, edit `DEFAULT_CLIENT_ROOT` and `DEFAULT_STAGING_UPDATE_ROOT` in `Tools\build-classic-update.bat`.
+4. After build, upload all contents of your staging folder to website folder `/update`.
+5. Confirm these URLs are reachable:
+6. `http://classic-gunbound.servegame.com/update/manifest.txt`
+7. `http://classic-gunbound.servegame.com/update/gamefiles/`
+8. Launch client and verify it patches only changed files.
 
 ### Features
 

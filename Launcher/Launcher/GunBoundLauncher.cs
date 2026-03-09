@@ -19,6 +19,7 @@ namespace Launcher
     class GunBoundLauncher
     {
         public static string hiveLocation = @"Software\Softnyx\GunBound";
+        const string DefaultPortalUrl = "http://classic-gunbound.servegame.com";
         const int VK_CAPITAL = 0x14;
         const byte KEYEVENTF_EXTENDEDKEY = 0x1;
         const byte KEYEVENTF_KEYUP = 0x2;
@@ -721,10 +722,37 @@ namespace Launcher
         public static string GetBaseUrl(string appBasePath)
         {
             var config = ReadIniConfig(appBasePath);
-            string baseUrl = IniGet(config, "LauncherConfig", "BaseUrl", "http://classic-gunbound.servegame.com");
+            string baseUrl = IniGet(config, "LauncherConfig", "BaseUrl", DefaultPortalUrl);
             if (string.IsNullOrEmpty(baseUrl))
-                baseUrl = "http://classic-gunbound.servegame.com";
+                baseUrl = DefaultPortalUrl;
             return baseUrl.Trim().TrimEnd('/');
+        }
+
+        static string BuildUpdateUrlFromBaseUrl(string baseUrl)
+        {
+            string normalized = (baseUrl ?? "").Trim();
+            if (normalized.Length == 0)
+                normalized = DefaultPortalUrl;
+            normalized = normalized.TrimEnd('/');
+            return normalized + "/update/";
+        }
+
+        static string BuildForgotPasswordUrlFromBaseUrl(string baseUrl)
+        {
+            string normalized = (baseUrl ?? "").Trim();
+            if (normalized.Length == 0)
+                normalized = DefaultPortalUrl;
+            normalized = normalized.TrimEnd('/');
+            return normalized + "/forgot-password";
+        }
+
+        static string BuildRegisterUrlFromBaseUrl(string baseUrl)
+        {
+            string normalized = (baseUrl ?? "").Trim();
+            if (normalized.Length == 0)
+                normalized = DefaultPortalUrl;
+            normalized = normalized.TrimEnd('/');
+            return normalized + "/register";
         }
 
         /// <summary>Verifies username/password with the server. POSTs application/x-www-form-urlencoded username and password. Returns true if 2xx, false otherwise with errorMessage set.</summary>
@@ -1004,12 +1032,12 @@ namespace Launcher
             gbKey.SetValue("AppID3", 3, RegistryValueKind.DWord);
             gbKey.SetValue("AutoRefresh", 1, RegistryValueKind.DWord);
             gbKey.SetValue("Background", new byte[] { 0x01 }, RegistryValueKind.Binary);
-            gbKey.SetValue("BuddyIP", "127.0.0.1", RegistryValueKind.String);
+            gbKey.SetValue("BuddyIP", "classic-gunbound.servegame.com", RegistryValueKind.String);
             gbKey.SetValue("ChannelName", new byte[] { 0x00 }, RegistryValueKind.Binary);
             gbKey.SetValue("Effect3D", new byte[] { 0x02 }, RegistryValueKind.Binary);
             gbKey.SetValue("EffectVolume", 95, RegistryValueKind.DWord);
             gbKey.SetValue("GameName", new byte[] { 0x00 }, RegistryValueKind.Binary);
-            gbKey.SetValue("IP", "127.0.0.1", RegistryValueKind.String);
+            gbKey.SetValue("IP", "classic-gunbound.servegame.com", RegistryValueKind.String);
             gbKey.SetValue("Language", 0, RegistryValueKind.DWord);
             gbKey.SetValue("LastID", new byte[] { 0x00 }, RegistryValueKind.Binary);
             gbKey.SetValue("LastServer", -1, RegistryValueKind.DWord);
@@ -1020,11 +1048,12 @@ namespace Launcher
             gbKey.SetValue("port", 8400, RegistryValueKind.DWord);
             gbKey.SetValue("Screen", @"C:\Program Files (x86)\softnyx\GunBound\Screen\", RegistryValueKind.String); // GKS
             gbKey.SetValue("ShootingMode", new byte[] { 0x00 }, RegistryValueKind.Binary);
-            gbKey.SetValue("Url_Fetch", "http://classic-gunbound.servegame.com", RegistryValueKind.String);
-            gbKey.SetValue("Url_ForgotPwd", "http://classic-gunbound.servegame.com", RegistryValueKind.String);
-            gbKey.SetValue("Url_Notice", "http://classic-gunbound.servegame.com/notice.html", RegistryValueKind.String);
-            gbKey.SetValue("Url_Signup", "http://classic-gunbound.servegame.com", RegistryValueKind.String);
-            gbKey.SetValue("Version", 313, RegistryValueKind.DWord);
+            gbKey.SetValue("Url_Fetch", DefaultPortalUrl, RegistryValueKind.String);
+            gbKey.SetValue("Url_Update", BuildUpdateUrlFromBaseUrl(DefaultPortalUrl), RegistryValueKind.String);
+            gbKey.SetValue("Url_ForgotPwd", BuildForgotPasswordUrlFromBaseUrl(DefaultPortalUrl), RegistryValueKind.String);
+            gbKey.SetValue("Url_Notice", DefaultPortalUrl + "/notice.html", RegistryValueKind.String);
+            gbKey.SetValue("Url_Signup", BuildRegisterUrlFromBaseUrl(DefaultPortalUrl), RegistryValueKind.String);
+            gbKey.SetValue("Version", 404, RegistryValueKind.DWord);
             gbKey.SetValue("FullScreen", 0, RegistryValueKind.DWord); // 0 = windowed, 1 = fullscreen (GunBound.gme may ignore this)
 
             return gbKey;
@@ -1062,8 +1091,8 @@ namespace Launcher
             string baseUrl = GetBaseUrl(appBasePath);
             gbKey.SetValue("IP", serverIP, RegistryValueKind.String);
             gbKey.SetValue("BuddyIP", buddyIP, RegistryValueKind.String);
-            gbKey.SetValue("Url_ForgotPwd", baseUrl, RegistryValueKind.String);
-            gbKey.SetValue("Url_Signup", baseUrl, RegistryValueKind.String);
+            gbKey.SetValue("Url_ForgotPwd", BuildForgotPasswordUrlFromBaseUrl(baseUrl), RegistryValueKind.String);
+            gbKey.SetValue("Url_Signup", BuildRegisterUrlFromBaseUrl(baseUrl), RegistryValueKind.String);
             string urlNotice = IniGet(config, "URLs", "Notice", null);
             if (string.IsNullOrEmpty(urlNotice)) urlNotice = IniGet(config, "LauncherConfig", "NoticeURL", null);
             if (!string.IsNullOrEmpty(urlNotice))

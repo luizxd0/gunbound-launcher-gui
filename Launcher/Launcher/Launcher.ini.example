@@ -1,10 +1,15 @@
 [URLs]
 # News/notice shown in the launcher panel (local file or http(s) URL). If omitted, uses notice.html in the launcher folder.
 Notice=.\notice.html
-# Patch/update (used when version-check and patching logic is implemented)
-Manifest=http://update.gunbound.site/update/file-list.txt
-BaseFiles=http://update.gunbound.site/update/gamefiles/
-LauncherVersion=http://update.gunbound.site/update/launcher-version.txt
+# Patch/update using a hosted manifest.
+# (If omitted, launcher falls back to classic-gunbound.servegame.com defaults in code.)
+Manifest=http://classic-gunbound.servegame.com/update/manifest.txt
+BaseFiles=http://classic-gunbound.servegame.com/update/gamefiles/
+LauncherVersion=http://classic-gunbound.servegame.com/update/launcher-version.txt
+# BaseFiles is optional if each manifest line includes a full URL column.
+# Manifest line format examples:
+#   relative/path.ext|<hash>|<size>
+#   relative/path.ext|<hash>|<size>|https://host/path.ext
 
 [LauncherConfig]
 LastID=
